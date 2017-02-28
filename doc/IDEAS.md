@@ -27,7 +27,7 @@ fila.
 
 #### Vector de valores:
 
-Este vector recoge la lista de valores no nulos que continene la matriz.
+Este vector recoge la lista de valores no nulos que contiene la matriz.
 
 ### ¿Cómo se relacionan los elementos anteriores?
 
@@ -116,3 +116,4 @@ Inicio
     fin_para
 Fin
 ```
+
