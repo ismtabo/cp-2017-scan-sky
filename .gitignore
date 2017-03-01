@@ -1,3 +1,6 @@
+# Scansky executables
+ScanSky_seq*
+
 # Object files
 *.o
 *.ko
