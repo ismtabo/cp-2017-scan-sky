@@ -152,6 +152,7 @@ int main (int argc, char* argv[])
  		perror ("Error reservando memoria");
 	   	return -1;
 	}
+	// #pragma omp parallel for shared(matrixResult, matrixData) private(i,j)
 	for(i=0;i< rows; i++){
 		for(j=0;j< columns; j++){
 			matrixResult[i*(columns)+j]=-1;
@@ -169,46 +170,55 @@ int main (int argc, char* argv[])
 	/* 4.1 Flag para ver si ha habido cambios y si se continua la ejecucion */
 	int flagCambio=1;
 
-	int vRegions = omp_get_num_threads(), ri, hRegions = omp_get_num_threads(), rj;
-	int vBlocks = (rows-2)/vRegions, hBlocks = (columns-2)/hRegions;
+	int sizeChunk = columns*rows/omp_get_max_threads();
+	// int vRegions = omp_get_num_threads(), ri, hRegions = omp_get_num_threads(), rj;
+	// int vBlocks = (rows-2)/vRegions, hBlocks = (columns-2)/hRegions;
 
 	/* 4.2 Busqueda de los bloques similiares */
 	for(t=0; flagCambio !=0; t++){
 		flagCambio=0;
 
 		/* 4.2.1 Actualizacion copia */
-		#pragma omp parallel for shared(rows,columns,matrixResult,matrixResultCopy,vBlocks,hBlocks) private(ri,rj,i,j)
-		for(ri=0;ri<vRegions;ri++)
-			for(rj=0;rj<hRegions;rj++)
-				for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
-					for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
-						if(matrixResult[i*(columns)+j]!=-1){
-							matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-						}
-					}
-				}
-		// for(i=1;i<rows-1;i++){
-		// 	for(j=1;j<columns-1;j++){
-		// 		if(matrixResult[i*(columns)+j]!=-1){
-		// 			matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-		// 		}
-		// 	}
-		// }
+		// #pragma omp parallel shared(rows,columns,matrixData,matrixResult,matrixResultCopy,vBlocks,hBlocks,flagCambio)
+		#pragma omp parallel shared(rows,columns,matrixData,matrixResult,matrixResultCopy,flagCambio)
+		{
 
-		/* 4.2.2 Computo y detecto si ha habido cambios */
-		#pragma omp parallel for shared(rows,columns,matrixResult,matrixResultCopy,vBlocks,hBlocks) private(ri,rj,i,j) reduction(+:flagCambio)
-		for(ri=0;ri<vRegions;ri++)
-			for(rj=0;rj<hRegions;rj++)
-				for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
-					for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
-						flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+			// #pragma omp for private(ri,rj,i,j) schedule(dynamic,vRegions)
+			// for(ri=0;ri<vRegions;ri++)
+			// 	for(rj=0;rj<hRegions;rj++)
+			// 		for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
+			// 			for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
+			// 				if(matrixResult[i*(columns)+j]!=-1){
+			// 					matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
+			// 				}
+			// 			}
+			// 		}
+			#pragma omp for private(i,j) schedule(dynamic,sizeChunk)
+			for(i=1;i<rows-1;i++){
+				for(j=1;j<columns-1;j++){
+					if(matrixResult[i*(columns)+j]!=-1){
+						matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
 					}
 				}
-		// for(i=1;i<rows-1;i++){
-		// 	for(j=1;j<columns-1;j++){
-		// 		flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
-		// 	}
+			}
+
+			/* 4.2.2 Computo y detecto si ha habido cambios */
+			// #pragma omp for private(ri,rj,i,j) reduction(+:flagCambio) schedule(dynamic,vRegions)
+			// for(ri=0;ri<vRegions;ri++)
+			// 	for(rj=0;rj<hRegions;rj++)
+			// 		for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
+			// 			for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
+			// 				flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+			// 			}
+			// 		}
 		// }
+			#pragma omp for private(i,j) reduction(+:flagCambio) schedule(dynamic,sizeChunk)
+			for(i=1;i<rows-1;i++){
+				for(j=1;j<columns-1;j++){
+					flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+				}
+			}
+		}
 
 		#ifdef DEBUG
 			printf("\nResultados iter %d: \n", t);
