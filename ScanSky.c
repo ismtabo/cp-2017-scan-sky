@@ -117,7 +117,7 @@ int main (int argc, char* argv[])
 	}
 	for(i=1;i<columns-1;i++){
 		matrixData[0*(columns)+i]=0;
-		matrixData[(columns-1)*(columns)+i]=0;
+		matrixData[(rows-1)*(columns)+i]=0;
 	}
 	/* 2.6 Relleno la matriz con los datos del fichero */
 	for(i=1;i<rows-1;i++){
@@ -192,10 +192,10 @@ int main (int argc, char* argv[])
 		{
 
 			#pragma omp for private(ri,rj,i,j) schedule(guided,sizeChunk) collapse(2)
-			for(ri=0;ri<vRegions;ri++)
-				for(rj=0;rj<hRegions;rj++)
-					for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
-						for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
+			for(ri=0;ri<=vRegions;ri++)
+				for(rj=0;rj<=hRegions;rj++)
+					for(i=(vBlocks*ri)+1;i<min(rows-1,(vBlocks*ri+vBlocks)+1);i++){
+						for(j=(hBlocks*rj)+1;j<min(columns-1,(hBlocks*rj+hBlocks)+1);j++){
 							if(matrixResult[i*(columns)+j]!=-1){
 								matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
 							}
@@ -212,10 +212,10 @@ int main (int argc, char* argv[])
 
 			/* 4.2.2 Computo y detecto si ha habido cambios */
 			#pragma omp for private(ri,rj,i,j) reduction(+:flagCambio) schedule(guided,sizeChunk) collapse(2)
-			for(ri=0;ri<vRegions;ri++)
-				for(rj=0;rj<hRegions;rj++)
-					for(i=(vBlocks*ri)+1;i<(vBlocks*ri+vBlocks)+1;i++){
-						for(j=(hBlocks*rj)+1;j<(hBlocks*rj+hBlocks)+1;j++){
+			for(ri=0;ri<=vRegions;ri++)
+				for(rj=0;rj<=hRegions;rj++)
+					for(i=(vBlocks*ri)+1;i<min(rows-1,(vBlocks*ri+vBlocks)+1);i++){
+						for(j=(hBlocks*rj)+1;j<min(columns-1,(hBlocks*rj+hBlocks)+1);j++){
 							flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
 						}
 					}
