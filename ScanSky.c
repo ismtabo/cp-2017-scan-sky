@@ -20,39 +20,7 @@
 /* Substituir min por el operador */
 #define min(x,y)    ((x) < (y)? (x) : (y))
 
-/**
-* Funcion secuencial para la busqueda de mi bloque
-*/
-int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
-	// Inicialmente cojo mi indice
-	int result=matrixResultCopy[x*columns+y];
-	if( result!= -1){
-		//Si es de mi mismo grupo, entonces actualizo
-		if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x-1)*columns+y]);
-		}
-		if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x+1)*columns+y]);
-		}
-		if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y-1]);
-		}
-		if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y+1]);
-		}
 
-		// Si el indice no ha cambiado retorna 0
-		if(matrixResult[x*columns+y] == result){ return 0; }
-		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-		else { matrixResult[x*columns+y]=result; return 1;}
-
-	}
-	return 0;
-}
 
 /**
 * Funcion principal
@@ -183,11 +151,36 @@ int main (int argc, char* argv[])
 			}
 		}
 
-		/* 4.2.2 Computo y detecto si ha habido cambios */
+		/* 4.2.2 Computo y detecto si ha habido cambios + parte ex-secuencial para la busqueda de mi bloque*/
 		#pragma omp parallel for shared(columns,rows) reduction(+:flagCambio) private(i,j) firstprivate(matrixData,matrixResult,matrixResultCopy)
 		for(i=1;i<rows-1;i++){
 			for(j=1;j<columns-1;j++){
-				flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+				int result=matrixResultCopy[i*columns+j];
+				int sol=0;
+				if( result!= -1){
+					//Si es de mi mismo grupo, entonces actualizo
+					if(matrixData[(i-1)*columns+j] == matrixData[i*columns+j])
+					{
+						result = min (result, matrixResultCopy[(i-1)*columns+j]);
+					}
+					if(matrixData[(i+1)*columns+j] == matrixData[i*columns+j])
+					{
+						result = min (result, matrixResultCopy[(i+1)*columns+j]);
+					}
+					if(matrixData[i*columns+j-1] == matrixData[i*columns+j])
+					{
+						result = min (result, matrixResultCopy[i*columns+j-1]);
+					}
+					if(matrixData[i*columns+j+1] == matrixData[i*columns+j])
+					{
+						result = min (result, matrixResultCopy[i*columns+j+1]);
+					}
+					// Si el indice no ha cambiado retorna 0
+					if(matrixResult[i*columns+j] == result){ sol=0; }
+					// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+					else { matrixResult[i*columns+j]=result; sol=1;}
+					flagCambio= flagCambio+ sol;
+				}
 			}
 		}
 
