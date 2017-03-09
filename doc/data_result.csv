@@ -1,0 +1,8 @@
+commit,num_req,queue,name_test,proc_th,result,temp,sum,description,,
+,487,openmplb,,,error,57,55603s,First try(tiling),Primer intento tiling,
+,681,openmplb,,,finished,3m 24s,Fix tiling,Corregido tiling sobre matrices donde los bloques no son exactos,,
+,685,openmp,circles1.data,1x1,finished,28,52277s,Test tiling one thread,Prueba de tiling con un hilo,
+,686,openmp,circles1.data,1x8,finished,8,85860s,Test tiling mul threads,Prueba de tiling con varios hilos,
+,744,openmplb,,,finished,1m 15s,Basic optimization,Reseteo de optimización a paralelización básica,,
+,751,openmplb,,,finished,1m 49s,Basic optimization with collapse and schedule,Optimización añadiendo política de reparto con guided y comprimiendo los bucles(collapse) ,,
+,976,openmplb,,,finished,56.57908s,Moved compute function into main code, change shared to firstprivate,Optimización moviendo el código de función al bucle en main, cambio de privacidad de shared a last private para varialbes de solo lectura y punteros a arrays
