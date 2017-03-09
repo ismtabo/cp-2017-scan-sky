@@ -124,13 +124,17 @@ int main (int argc, char* argv[])
 	   	return -1;
 	}
 
-	#pragma omp parallel for  private(i,j) firstprivate(columns, rows,matrixResult, matrixData)
+	#pragma omp parallel for ordered shared(contIndex)  private(i,j) firstprivate(columns, rows, matrixResult, matrixData, matrixIndex)
 	for(i=0;i< rows; i++){
 		for(j=0;j< columns; j++){
 			matrixResult[i*(columns)+j]=-1;
 			// Si es 0 se trata del fondo y no lo computamos
 			if(matrixData[i*(columns)+j]!=0){
 				matrixResult[i*(columns)+j]=i*(columns)+j;
+                #pragma omp ordered
+                {
+                    matrixIndex[contIndex++] = i*(columns)+j;
+                }
 			}
 		}
 	}
@@ -147,47 +151,79 @@ int main (int argc, char* argv[])
 		flagCambio=0;
 
 		/* 4.2.1 Actualizacion copia */
-		#pragma omp parallel for  private(i,j) firstprivate(columns, rows,matrixResult,matrixResultCopy)
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				if(matrixResult[i*(columns)+j]!=-1){
-					matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-				}
-			}
-		}
+		#pragma omp parallel for  private(i) firstprivate(contIndex,matrixResult,matrixResultCopy,matrixIndex)
+        for(i=1;i<contIndex;i++)
+            matrixResultCopy[matrixIndex[i]]=matrixResult[matrixIndex[i]];
+		//#pragma omp parallel for  private(i,j) firstprivate(columns, rows,matrixResult,matrixResultCopy)
+		//for(i=1;i<rows-1;i++){
+		//	for(j=1;j<columns-1;j++){
+		//		if(matrixResult[i*(columns)+j]!=-1){
+		//			matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
+		//		}
+		//	}
 
 		/* 4.2.2 Computo y detecto si ha habido cambios + parte ex-secuencial para la busqueda de mi bloque*/
-		#pragma omp parallel for reduction(+:flagCambio) private(i,j) firstprivate(columns,rows,matrixData,matrixResult,matrixResultCopy)
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				int result=matrixResultCopy[i*columns+j];
-				int sol=0;
-				if( result!= -1){
-					//Si es de mi mismo grupo, entonces actualizo
-					if(matrixData[(i-1)*columns+j] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[(i-1)*columns+j]);
-					}
-					if(matrixData[(i+1)*columns+j] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[(i+1)*columns+j]);
-					}
-					if(matrixData[i*columns+j-1] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[i*columns+j-1]);
-					}
-					if(matrixData[i*columns+j+1] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[i*columns+j+1]);
-					}
-					// Si el indice no ha cambiado retorna 0
-					if(matrixResult[i*columns+j] == result){ sol=0; }
-					// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-					else { matrixResult[i*columns+j]=result; sol=1;}
-					flagCambio= flagCambio+ sol;
-				}
-			}
-		}
+        #pragma omp parallel for reduction(+:flagCambio) private(i) firstprivate(contIndex,columns,matrixData,matrixResult,matrixResultCopy,matrixIndex)
+        for(i=0;i<contIndex;i++){
+            int pos = matrixIndex[i]; 
+
+		    int result=matrixResultCopy[pos];
+		    int sol=0;
+		    //Si es de mi mismo grupo, entonces actualizo
+		    if(matrixData[pos-columns] == matrixData[pos])
+		    {
+		    	result = min (result, matrixResultCopy[pos-columns]);
+		    }
+		    if(matrixData[pos+columns] == matrixData[pos])
+		    {
+		    	result = min (result, matrixResultCopy[pos+columns]);
+		    }
+		    if(matrixData[pos-1] == matrixData[pos])
+		    {
+		    	result = min (result, matrixResultCopy[pos-1]);
+		    }
+		    if(matrixData[pos+1] == matrixData[pos])
+		    {
+		    	result = min (result, matrixResultCopy[pos+1]);
+		    }
+		    // Si el indice no ha cambiado retorna 0
+		    if(matrixResult[pos] == result){ sol=0; }
+		    // Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+		    else { matrixResult[pos]=result; sol=1;}
+		    flagCambio= flagCambio+ sol;
+        }
+
+		// #pragma omp parallel for reduction(+:flagCambio) private(i,j) firstprivate(columns,rows,matrixData,matrixResult,matrixResultCopy)
+		// for(i=1;i<rows-1;i++){
+		// 	for(j=1;j<columns-1;j++){
+		// 		int result=matrixResultCopy[i*columns+j];
+		// 		int sol=0;
+		// 		if( result!= -1){
+		// 			//Si es de mi mismo grupo, entonces actualizo
+		// 			if(matrixData[(i-1)*columns+j] == matrixData[i*columns+j])
+		// 			{
+		// 				result = min (result, matrixResultCopy[(i-1)*columns+j]);
+		// 			}
+		// 			if(matrixData[(i+1)*columns+j] == matrixData[i*columns+j])
+		// 			{
+		// 				result = min (result, matrixResultCopy[(i+1)*columns+j]);
+		// 			}
+		// 			if(matrixData[i*columns+j-1] == matrixData[i*columns+j])
+		// 			{
+		// 				result = min (result, matrixResultCopy[i*columns+j-1]);
+		// 			}
+		// 			if(matrixData[i*columns+j+1] == matrixData[i*columns+j])
+		// 			{
+		// 				result = min (result, matrixResultCopy[i*columns+j+1]);
+		// 			}
+		// 			// Si el indice no ha cambiado retorna 0
+		// 			if(matrixResult[i*columns+j] == result){ sol=0; }
+		// 			// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+		// 			else { matrixResult[i*columns+j]=result; sol=1;}
+		// 			flagCambio= flagCambio+ sol;
+		// 		}
+		// 	}
+		// }
 
 		#ifdef DEBUG
 			printf("\nResultados iter %d: \n", t);
