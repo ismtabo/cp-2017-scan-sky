@@ -1,13 +1,8 @@
 /*
 * Contar cuerpos celestes
 *
-* Asignatura Computación Paralela (Grado Ingeniería Informática)
-* Código secuencial base
-*
-* @author Ana Moretón Fernández
-* @version v1.2
-*
-* (c) 2017, Grupo Trasgo, Universidad de Valladolid
+* Rodríguez Ares, Silvia
+* Taboada Rodero, Ismael
 */
 
 #include <stdio.h>
@@ -124,7 +119,7 @@ int main (int argc, char* argv[])
 	   	return -1;
 	}
 
-	#pragma omp parallel for  private(i,j) firstprivate(columns, rows,matrixResult, matrixData)
+	#pragma omp parallel for ordered private(i,j) firstprivate(columns, rows,matrixResult, matrixData)
 	for(i=0;i< rows; i++){
 		for(j=0;j< columns; j++){
 			matrixResult[i*(columns)+j]=-1;
@@ -132,8 +127,17 @@ int main (int argc, char* argv[])
 			if(matrixData[i*(columns)+j]!=0){
 				matrixResult[i*(columns)+j]=i*(columns)+j;
 			}
+			if(matrixData[i*(columns)+j]>0){
+					#pragma omp critical(contIndex)
+					matrixIndex[contIndex++] = i*(columns)+j;
+			}
 		}
 	}
+	#ifdef DEBUG
+	for(i=0;i<contIndex; i++){
+		printf("%d\n",matrixIndex[i]);
+	}
+	#endif
 
 
 
@@ -147,46 +151,41 @@ int main (int argc, char* argv[])
 		flagCambio=0;
 
 		/* 4.2.1 Actualizacion copia */
-		#pragma omp parallel for  private(i,j) firstprivate(columns, rows,matrixResult,matrixResultCopy)
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				if(matrixResult[i*(columns)+j]!=-1){
-					matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-				}
-			}
+		#pragma omp parallel for private(i,j) firstprivate(matrixResult,matrixResultCopy)
+		for(i=0;i<contIndex;i++){
+				j=matrixIndex[i];
+				matrixResultCopy[j]=matrixResult[j];
 		}
 
 		/* 4.2.2 Computo y detecto si ha habido cambios + parte ex-secuencial para la busqueda de mi bloque*/
-		#pragma omp parallel for reduction(+:flagCambio) private(i,j) firstprivate(columns,rows,matrixData,matrixResult,matrixResultCopy)
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				int result=matrixResultCopy[i*columns+j];
-				int sol=0;
-				if( result!= -1){
-					//Si es de mi mismo grupo, entonces actualizo
-					if(matrixData[(i-1)*columns+j] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[(i-1)*columns+j]);
-					}
-					if(matrixData[(i+1)*columns+j] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[(i+1)*columns+j]);
-					}
-					if(matrixData[i*columns+j-1] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[i*columns+j-1]);
-					}
-					if(matrixData[i*columns+j+1] == matrixData[i*columns+j])
-					{
-						result = min (result, matrixResultCopy[i*columns+j+1]);
-					}
-					// Si el indice no ha cambiado retorna 0
-					if(matrixResult[i*columns+j] == result){ sol=0; }
-					// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-					else { matrixResult[i*columns+j]=result; sol=1;}
-					flagCambio= flagCambio+ sol;
-				}
-			}
+		#pragma omp parallel for reduction(+:flagCambio) private(i,j) firstprivate(matrixIndex,columns,rows,matrixData,matrixResult,matrixResultCopy)
+		for(i=0;i<contIndex;i++){
+			int result,sol;
+			j=matrixIndex[i];
+			result=matrixResultCopy[j];
+			sol=0;
+			//Si es de mi mismo grupo, entonces actualizo
+		 if(matrixData[j-columns] == matrixData[j])
+		 {
+			 result = min (result, matrixResultCopy[j-columns]);
+		 }
+		 if(matrixData[j+columns] == matrixData[j])
+		 {
+			 result = min (result, matrixResultCopy[j+columns]);
+		 }
+		 if(matrixData[j-1] == matrixData[j])
+		 {
+			 result = min (result, matrixResultCopy[j-1]);
+		 }
+		 if(matrixData[j+1] == matrixData[j])
+		 {
+			 result = min (result, matrixResultCopy[j+1]);
+		 }
+		 // Si el indice no ha cambiado retorna 0
+		 if(matrixResult[j] == result){ sol=0; }
+		 // Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+		 else { matrixResult[j]=result; sol=1;}
+		 flagCambio= flagCambio+ sol;
 		}
 
 		#ifdef DEBUG
@@ -238,5 +237,5 @@ int main (int argc, char* argv[])
 	free(matrixData);
 	free(matrixResult);
 	free(matrixResultCopy);
-
+	free(matrixIndex);
 }
