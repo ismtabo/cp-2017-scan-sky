@@ -119,7 +119,7 @@ int main (int argc, char* argv[])
 	   	return -1;
 	}
 
-	#pragma omp parallel for ordered private(i,j) firstprivate(columns, rows,matrixResult, matrixData)
+	#pragma omp nowait parallel for shared(matrixIndex,matrixResult) private(i,j) firstprivate(columns, rows,matrixData)
 	for(i=0;i< rows; i++){
 		for(j=0;j< columns; j++){
 			matrixResult[i*(columns)+j]=-1;
