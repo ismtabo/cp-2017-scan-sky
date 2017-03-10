@@ -21,39 +21,6 @@
 /* Substituir min por el operador */
 #define min(x,y)    ((x) < (y)? (x) : (y))
 
-/**
-* Funcion secuencial para la busqueda de mi bloque
-*/
-int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
-	// Inicialmente cojo mi indice
-	int result=matrixResultCopy[x*columns+y];
-	if( result!= -1){
-		//Si es de mi mismo grupo, entonces actualizo
-		if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x-1)*columns+y]);
-		}
-		if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x+1)*columns+y]);
-		}
-		if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y-1]);
-		}
-		if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y+1]);
-		}
-
-		// Si el indice no ha cambiado retorna 0
-		if(matrixResult[x*columns+y] == result){ return 0; }
-		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-		else { matrixResult[x*columns+y]=result; return 1;}
-
-	}
-	return 0;
-}
 
 /**
 * Funcion principal
@@ -152,13 +119,14 @@ int main (int argc, char* argv[])
  		perror ("Error reservando memoria");
 	   	return -1;
 	}
-	#pragma omp parallel for shared(matrixResult, matrixData) private(i,j)
+	#pragma omp parallel for private(i,j) firstprivate(rows,columns,matrixData,matrixResult)
 	for(i=0;i< rows; i++){
 		for(j=0;j< columns; j++){
-			matrixResult[i*(columns)+j]=-1;
+			int pos=i*(columns)+j;
+			matrixResult[pos]=-1;
 			// Si es 0 se trata del fondo y no lo computamos
-			if(matrixData[i*(columns)+j]!=0){
-				matrixResult[i*(columns)+j]=i*(columns)+j;
+			if(matrixData[pos]!=0){
+				matrixResult[pos]=pos;
 			}
 		}
 	}
@@ -172,11 +140,11 @@ int main (int argc, char* argv[])
 
 	// int sizeChunk = columns*rows/omp_get_max_threads();
 	int sizeChunk = 1;
-	int vRegions, hRegions, vBlocks, hBlocks, ri, rj;
+	int vRegions, hRegions, vBlocks, hBlocks, ri, rj,pos;
 
 	// Tiling size definition
 	// - By number of regions
-	vRegions = hRegions = omp_get_num_threads()*4;
+	vRegions = hRegions = omp_get_num_threads()*12;
 	vBlocks = (rows-2)/vRegions, hBlocks = (columns-2)/hRegions;
 	// - By size of block
 	// vBlocks = hBlocks = omp_get_num_threads();
@@ -188,7 +156,7 @@ int main (int argc, char* argv[])
 
 		/* 4.2.1 Actualizacion copia */
 		// #pragma omp parallel shared(rows,columns,matrixData,matrixResult,matrixResultCopy,vBlocks,hBlocks,flagCambio)
-		#pragma omp parallel shared(rows,columns,sizeChunk,vRegions,hRegions,vBlocks,hBlocks,flagCambio) firstprivate(matrixData,matrixResult,matrixResultCopy)
+		#pragma omp parallel reduction(+:flagCambio) firstprivate(pos,sizeChunk,vRegions,hRegions,vBlocks,hBlocks,rows,columns,matrixData,matrixResult,matrixResultCopy)
 		{
 
 			#pragma omp for private(ri,rj,i,j) schedule(guided,sizeChunk) collapse(2)
@@ -196,8 +164,9 @@ int main (int argc, char* argv[])
 				for(rj=0;rj<=hRegions;rj++)
 					for(i=(vBlocks*ri)+1;i<min(rows-1,(vBlocks*ri+vBlocks)+1);i++){
 						for(j=(hBlocks*rj)+1;j<min(columns-1,(hBlocks*rj+hBlocks)+1);j++){
-							if(matrixResult[i*(columns)+j]!=-1){
-								matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
+							pos=i*(columns)+j;
+							if(matrixResult[pos]!=-1){
+								matrixResultCopy[pos]=matrixResult[pos];
 							}
 						}
 					}
@@ -211,14 +180,45 @@ int main (int argc, char* argv[])
 			// }
 
 			/* 4.2.2 Computo y detecto si ha habido cambios */
-			#pragma omp for private(ri,rj,i,j) reduction(+:flagCambio) schedule(guided,sizeChunk) collapse(2)
-			for(ri=0;ri<=vRegions;ri++)
-				for(rj=0;rj<=hRegions;rj++)
+			#pragma omp for private(ri,rj,i,j) schedule(guided,sizeChunk) collapse(2)
+			for(ri=0;ri<=vRegions;ri++){
+				for(rj=0;rj<=hRegions;rj++){
 					for(i=(vBlocks*ri)+1;i<min(rows-1,(vBlocks*ri+vBlocks)+1);i++){
 						for(j=(hBlocks*rj)+1;j<min(columns-1,(hBlocks*rj+hBlocks)+1);j++){
-							flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+
+
+							int result,sol=0,pos;
+							pos=i*columns+j;
+							result=matrixResultCopy[pos];
+							if( result!= -1){
+								//Si es de mi mismo grupo, entonces actualizo
+								if(matrixData[(i-1)*columns+j] == matrixData[pos])
+								{
+									result = min (result, matrixResultCopy[(i-1)*columns+j]);
+								}
+								if(matrixData[(i+1)*columns+j] == matrixData[pos])
+								{
+									result = min (result, matrixResultCopy[(i+1)*columns+j]);
+								}
+								if(matrixData[pos-1] == matrixData[pos])
+								{
+									result = min (result, matrixResultCopy[pos-1]);
+								}
+								if(matrixData[pos+1] == matrixData[pos])
+								{
+									result = min (result, matrixResultCopy[pos+1]);
+								}
+
+								// Si el indice no ha cambiado retorna 0
+								if(matrixResult[pos] == result){ sol=0; }
+								// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+								else { matrixResult[pos]=result; sol=1;}
+							}
+							flagCambio= flagCambio+ sol;
 						}
 					}
+				}
+			}
 			// #pragma omp for private(i,j) reduction(+:flagCambio) schedule(dynamic,sizeChunk)
 			// for(i=1;i<rows-1;i++){
 			// 	for(j=1;j<columns-1;j++){
@@ -241,7 +241,7 @@ int main (int argc, char* argv[])
 
 	/* 4.3 Inicio cuenta del numero de bloques */
 	numBlocks=0;
-	#pragma omp parallel for shared(matrixResult,rows,columns) private(i,j) reduction(+:numBlocks)
+	#pragma omp parallel for private(i,j) reduction(+:numBlocks) firstprivate(matrixResult,rows,columns)
 	for(i=1;i<rows-1;i++){
 		for(j=1;j<columns-1;j++){
 			if(matrixResult[i*columns+j] == i*columns+j) numBlocks++;
