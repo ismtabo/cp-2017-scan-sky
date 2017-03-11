@@ -128,7 +128,7 @@ int main (int argc, char* argv[])
 				matrixResult[i*(columns)+j]=i*(columns)+j;
 			}
 			if(matrixData[i*(columns)+j]>0){
-					#pragma omp critical(contIndex)
+					#pragma omp atomic write
 					matrixIndex[contIndex++] = i*(columns)+j;
 			}
 		}
