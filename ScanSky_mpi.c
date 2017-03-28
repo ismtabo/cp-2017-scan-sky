@@ -1,14 +1,8 @@
 /*
 * Contar cuerpos celestes
 *
-* Asignatura Computación Paralela (Grado Ingeniería Informática)
-* Código secuencial base
-*
-* @author Ana Moretón Fernández
-* @author Eduardo Rodríguez Gutiez
-* @version v1.3
-*
-* (c) 2017, Grupo Trasgo, Universidad de Valladolid
+* Rodríguez Ares, Silvia
+* Taboada Rodero, Ismael
 */
 
 #include <stdio.h>
@@ -154,6 +148,7 @@ int main (int argc, char* argv[])
 	//
 	// EL CODIGO A PARALELIZAR COMIENZA AQUI
 	//
+    int k;
 	if ( world_rank == 0 ) {
 
 		/* 3. Etiquetado inicial */
@@ -195,8 +190,35 @@ int main (int argc, char* argv[])
 
 			/* 4.2.2 Computo y detecto si ha habido cambios */
 			for(i=1;i<rows-1;i++){
-				for(j=1;j<columns-1;j++){
-					flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+				for(k=1;k<columns-1;k++){
+//					flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+
+        			int result,sol;
+                    j=i*columns+k;
+        			result=matrixResultCopy[j];
+        			sol=0;
+        			//Si es de mi mismo grupo, entonces actualizo
+        		    if(matrixData[j-columns] == matrixData[j])
+        		    {
+        		        result = min (result, matrixResultCopy[j-columns]);
+        		    }
+        		    if(matrixData[j+columns] == matrixData[j])
+        		    {
+        		        result = min (result, matrixResultCopy[j+columns]);
+        		    }
+        		    if(matrixData[j-1] == matrixData[j])
+        		    {
+        		        result = min (result, matrixResultCopy[j-1]);
+        		    }
+        		    if(matrixData[j+1] == matrixData[j])
+        		    {
+        		        result = min (result, matrixResultCopy[j+1]);
+        		    }
+        		    // Si el indice no ha cambiado retorna 0
+        		    if(matrixResult[j] == result){ sol=0; }
+        		    // Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+        		    else { matrixResult[j]=result; sol=1;}
+        		    flagCambio= flagCambio+ sol;
 				}
 			}
 
