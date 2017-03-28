@@ -7,7 +7,9 @@
 CC=gcc
 CFLAGS=-O3
 
-EXES=ScanSky_seq ScanSky_seq_debug ScanSky_seq_write
+MPICC=mpicc
+
+EXES=ScanSky_seq ScanSky_seq_debug ScanSky_seq_write ScanSky_mpiseq ScanSky_mpi
 
 all: $(EXES)
 
@@ -23,3 +25,8 @@ ScanSky_seq_debug: ScanSky_seq.c cputils.h
 ScanSky_seq_write: ScanSky_seq.c cputils.h
 	$(CC) $(CFLAGS) -DWRITE $< -o  $@
 
+ScanSky_mpiseq: ScanSky_mpiseq.c cputils.h
+    $(MPICC) $(CFLAGS) $< -o $@ 
+
+ScanSky_mpi: ScanSky_mpi.c cputils.h
+    $(MPICC) $(CFLAGS) $< -o $@ 
