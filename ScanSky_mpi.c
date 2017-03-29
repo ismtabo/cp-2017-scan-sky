@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "cputils.h"
+#define cp_Wtime MPI_Wtime
 #include <mpi.h>
 
 
@@ -19,42 +20,50 @@
 /**
 * Funcion secuencial para la busqueda de mi bloque 
 */
-int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
-	// Inicialmente cojo mi indice
-	int result=matrixResultCopy[x*columns+y];
-	if( result!= -1){
-		//Si es de mi mismo grupo, entonces actualizo
-		if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x-1)*columns+y]);
-		}
-		if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[(x+1)*columns+y]);
-		}
-		if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y-1]);
-		}
-		if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
-		{
-			result = min (result, matrixResultCopy[x*columns+y+1]);
-		}
-
-		// Si el indice no ha cambiado retorna 0
-		if(matrixResult[x*columns+y] == result){ return 0; }
-		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-		else { matrixResult[x*columns+y]=result; return 1;}
-		
-	}
-	return 0; 
-}
+// int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
+// 	// Inicialmente cojo mi indice
+// 	int result=matrixResultCopy[x*columns+y];
+// 	if( result!= -1){
+// 		//Si es de mi mismo grupo, entonces actualizo
+// 		if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
+// 		{
+// 			result = min (result, matrixResultCopy[(x-1)*columns+y]);
+// 		}
+// 		if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
+// 		{
+// 			result = min (result, matrixResultCopy[(x+1)*columns+y]);
+// 		}
+// 		if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
+// 		{
+// 			result = min (result, matrixResultCopy[x*columns+y-1]);
+// 		}
+// 		if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
+// 		{
+// 			result = min (result, matrixResultCopy[x*columns+y+1]);
+// 		}
+// 
+// 		// Si el indice no ha cambiado retorna 0
+// 		if(matrixResult[x*columns+y] == result){ return 0; }
+// 		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+// 		else { matrixResult[x*columns+y]=result; return 1;}
+// 		
+// 	}
+// 	return 0; 
+// }
 
 /**
 * Funcion principal
 */
 int main (int argc, char* argv[])
 {
+
+/*int iax = 0;
+char hostname[256];
+gethostname(hostname, sizeof(hostname));
+printf("PID %d on %s ready for attach\n", getpid(), hostname);
+fflush(stdout);
+while (0 == iax)
+      sleep(5);*/
 
 	/* 1. Leer argumento y declaraciones */
 	if (argc < 2) 	{ 		
@@ -148,7 +157,14 @@ int main (int argc, char* argv[])
 	//
 	// EL CODIGO A PARALELIZAR COMIENZA AQUI
 	//
+
     int k;
+    int dimensions[3];  // Vector of matrix and submatrix dimensions for communication
+    int size_block, ncells;  // Number of rows and number of cells of proc submatrix
+    int vectorSizeBlocks[world_rank], vectorDis[world_rank];  // Vector with number of cells of and displacement for each proc
+    int previous, next;  // Rank of previos and next proc 
+    int *sub_matrixResultCopy, *sub_matrixResult;  // Proper submatrixes 
+
 	if ( world_rank == 0 ) {
 
 		/* 3. Etiquetado inicial */
@@ -167,73 +183,178 @@ int main (int argc, char* argv[])
 				}
 			}
 		}
+        dimensions[0] = rows;
+        dimensions[1] = columns;
+        dimensions[2] = size_block = rows/world_size; 
 
+    }
+    if(!world_rank){
+        for(i=0; i<rows; ++i){
+            for(j=0; j<columns; ++j){
+                printf("%d ", matrixResult[i*columns+j]);
+            }
+            printf("\n");
+        }
+    }
+    
+    if(!world_rank) printf("finish start\n");
 
+    // Broadcast matrix dimensions
+    MPI_Bcast(dimensions, 3, MPI_INT, 0, MPI_COMM_WORLD);
+    previous = world_rank - 1; 
+    next = world_rank + 1; 
+    if(!world_rank) printf("finish broadcast dim\n");
 
-		/* 4. Computacion */
-		int t=0;
-		/* 4.1 Flag para ver si ha habido cambios y si se continua la ejecucion */
-		int flagCambio=1; 
+    if( world_rank ){
+        rows = dimensions[0];
+        columns = dimensions[1];
+        size_block = dimensions[2];
+        matrixData = (int*) malloc(sizeof(int)*rows*columns);
+    }
+    
+    if( world_rank == world_size-1)
+        size_block += columns % world_size;
+    
+    // Broadcast of data matrix
+    MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
+    if(!world_rank) printf("finish broadcast matrix\n");
 
-		/* 4.2 Busqueda de los bloques similiares */
-		for(t=0; flagCambio !=0; t++){
-			flagCambio=0; 
+    ncells = size_block*columns;
+    printf("[%d] ncells<-%d(%dof%dx%d)\n",world_rank,ncells,size_block,rows, columns);fflush(stdout);
 
-			/* 4.2.1 Actualizacion copia */
-			for(i=1;i<rows-1;i++){
-				for(j=1;j<columns-1;j++){
-					if(matrixResult[i*(columns)+j]!=-1){
-						matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-					}
+    // Group number of cells for each proc submatrix
+    MPI_Gather(&ncells, 1, MPI_INT, vectorSizeBlocks, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if(!world_rank) printf("finish gather vector ncells\n");
+
+    // Calculate displacements
+    if(world_rank==0){
+        vectorDis[0]=0;
+        for(i=1; i<world_size; i++)
+            vectorDis[i] = vectorDis[i-1]+vectorSizeBlocks[i];
+        for(i=0; i<world_size; i++)
+            printf("[%d] %d %d ", i, vectorSizeBlocks[i], vectorDis[i]);
+        printf("\n");
+    }
+    if(!world_rank) printf("finish calculate vector displacement\n");
+
+    if(world_size > 1){
+        if( world_rank == 0 ){
+            size_block +=1;
+            previous = MPI_PROC_NULL;
+        } else if( world_rank < world_size-1 ) {
+            size_block += 2;
+        } else if( world_rank == world_size-1) {
+            size_block += 1;
+            next = MPI_PROC_NULL; 
+        }
+    }
+
+    sub_matrixResult = (int*) malloc(sizeof(int)*size_block*columns);
+    sub_matrixResultCopy = (int*) malloc(sizeof(int)*size_block*columns);
+    if(!world_rank) printf("finish malloc sub matrix\n");
+    
+    MPI_Scatterv(matrixResult, vectorSizeBlocks, vectorDis, MPI_INT, sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, 0, MPI_COMM_WORLD);
+    if(!world_rank) printf("finish scatter matrix\n");
+    //if(!world_rank){
+        for(i=0; i<size_block; ++i){
+            for(j=0; j<columns; ++j){
+                printf("%d ", sub_matrixResult[i*columns+j]);
+            }
+            printf("\n");
+        }
+    //}
+
+	/* 4. Computacion */
+	int t=0;
+	/* 4.1 Flag para ver si ha habido cambios y si se continua la ejecucion */
+	int flagCambio=1; 
+
+	/* 4.2 Busqueda de los bloques similiares */
+    MPI_Barrier(MPI_COMM_WORLD);
+	for(t=0; flagCambio !=0; t++){
+		flagCambio=0; 
+    
+        if(world_size > 1){
+                // Segment fault at sending on both programs
+                MPI_Isend(&sub_matrixResult[columns], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_REQUEST_NULL);  // Send row #1
+                printf("%d finish send previous communication\n", world_rank);fflush(stdout);
+                MPI_Recv(&sub_matrixResult[(size_block-1)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to last row
+                printf("%d finish previous communication\n", world_rank);fflush(stdout);
+                MPI_Isend(&sub_matrixResult[(size_block-2)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_REQUEST_NULL);  // Send penultimate row1
+                printf("%d finish send next communication\n", world_rank);fflush(stdout);
+                MPI_Recv(&sub_matrixResult[0], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to first row
+                printf("%d finish next communication\n", world_rank);fflush(stdout);
+                // MPI_Irecv(sub_matrixResult, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to first row
+                // MPI_Send(sub_matrixResult+(size_block-2)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD);  // Send penultimate row1
+                // MPI_Irecv(sub_matrixResult+(size_block-1)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to last row
+                // MPI_Send(sub_matrixResult+columns, columns, MPI_INT, previous, 0, MPI_COMM_WORLD);  // Send row #1
+        }
+        //añadie mpi wait para los dos request?
+        printf("%d finish communication\n", world_rank);fflush(stdout);
+		/* 4.2.1 Actualizacion copia */
+		for(i=1;i<size_block-1;i++){
+			for(j=1;j<columns-1;j++){
+				if(sub_matrixResult[i*(columns)+j]!=-1){
+					sub_matrixResultCopy[i*(columns)+j]=sub_matrixResult[i*(columns)+j];
 				}
 			}
-
-			/* 4.2.2 Computo y detecto si ha habido cambios */
-			for(i=1;i<rows-1;i++){
-				for(k=1;k<columns-1;k++){
-//					flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
-
-        			int result,sol;
-                    j=i*columns+k;
-        			result=matrixResultCopy[j];
-        			sol=0;
-        			//Si es de mi mismo grupo, entonces actualizo
-        		    if(matrixData[j-columns] == matrixData[j])
-        		    {
-        		        result = min (result, matrixResultCopy[j-columns]);
-        		    }
-        		    if(matrixData[j+columns] == matrixData[j])
-        		    {
-        		        result = min (result, matrixResultCopy[j+columns]);
-        		    }
-        		    if(matrixData[j-1] == matrixData[j])
-        		    {
-        		        result = min (result, matrixResultCopy[j-1]);
-        		    }
-        		    if(matrixData[j+1] == matrixData[j])
-        		    {
-        		        result = min (result, matrixResultCopy[j+1]);
-        		    }
-        		    // Si el indice no ha cambiado retorna 0
-        		    if(matrixResult[j] == result){ sol=0; }
-        		    // Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-        		    else { matrixResult[j]=result; sol=1;}
-        		    flagCambio= flagCambio+ sol;
-				}
-			}
-
-			#ifdef DEBUG
-				printf("\nResultados iter %d: \n", t);
-				for(i=0;i<rows;i++){
-					for(j=0;j<columns;j++){
-						printf ("%d\t", matrixResult[i*columns+j]);
-					}
-					printf("\n");
-				}
-			#endif
-
 		}
 
+		/* 4.2.2 Computo y detecto si ha habido cambios */
+		for(i=1;i<size_block-1;i++){
+			for(k=1;k<columns-1;k++){
+//				flagCambio= flagCambio+ computation(i,j,columns, matrixData, sub_matrixResult, sub_matrixResultCopy);
+
+    			int result,sol;
+                j=i*columns+k;
+    			result=sub_matrixResultCopy[j];
+    			sol=0;
+                if(result!=-1){
+    		    	//Si es de mi mismo grupo, entonces actualizo
+    		        if(matrixData[j-columns] == matrixData[j])
+    		        {
+    		            result = min (result, sub_matrixResultCopy[j-columns]);
+    		        }
+    		        if(matrixData[j+columns] == matrixData[j])
+    		        {
+    		            result = min (result, sub_matrixResultCopy[j+columns]);
+    		        }
+    		        if(matrixData[j-1] == matrixData[j])
+    		        {
+    		            result = min (result, sub_matrixResultCopy[j-1]);
+    		        }
+    		        if(matrixData[j+1] == matrixData[j])
+    		        {
+    		            result = min (result, sub_matrixResultCopy[j+1]);
+    		        }
+    		        // Si el indice no ha cambiado retorna 0
+    		        if(sub_matrixResult[j] == result){ sol=0; }
+    		        // Si el indice cambia, actualizo sub_matrix de resultados con el indice adecuado y retorno 1
+    		        else { sub_matrixResult[j]=result; sol=1;}
+    		        flagCambio= flagCambio+ sol;
+                }
+		    }
+		}
+
+		#ifdef DEBUG
+			printf("\nResultados iter %d: \n", t);
+			for(i=0;i<rows;i++){
+				for(j=0;j<columns;j++){
+					printf ("%d\t", matrixResult[i*columns+j]);
+				}
+				printf("\n");
+			}
+		#endif
+        
+        MPI_Allreduce(MPI_IN_PLACE, &flagCambio, 0, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+        if(!world_rank) printf("finish iteration #%d flagCambio:%d\n", t, flagCambio);
+	}
+
+    MPI_Gatherv(sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, matrixResult, vectorSizeBlocks, vectorDis, MPI_INT, 0, MPI_COMM_WORLD);   
+
+    if(world_rank==0)
+    {
 		/* 4.3 Inicio cuenta del numero de bloques */
 		numBlocks=0;
 		for(i=1;i<rows-1;i++){
@@ -242,6 +363,11 @@ int main (int argc, char* argv[])
 			}
 		}
 	}
+
+    if(world_rank)
+        free(matrixData);    
+    free(sub_matrixResult);
+    free(sub_matrixResultCopy);
 
 	//
 	// EL CODIGO A PARALELIZAR TERMINA AQUI
