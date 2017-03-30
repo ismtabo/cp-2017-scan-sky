@@ -119,7 +119,7 @@ while (0 == iax)
     int dimensions[3];  // Vector of matrix and submatrix dimensions for communication
     int size_block, ncells;  // Number of rows and number of cells of proc submatrix
     int displacement; // Displacement of proc at initial matrix
-    int vectorSizeBlocks[world_rank], vectorDis[world_rank];  // Vector with number of cells of and displacement for each proc
+    int vectorSizeBlocks[world_size], vectorDis[world_size];  // Vector with number of cells of and displacement for each proc
     int previous, next;  // Rank of previos and next proc 
     int *sub_matrixResultCopy, *sub_matrixResult;  // Proper submatrixes 
     MPI_Status stat;
@@ -184,14 +184,22 @@ while (0 == iax)
 
     // Calculate displacements
     if(world_rank==0){
+        for(i=0; i<world_size; i++)
+            printf("[%d] %d ",i, vectorSizeBlocks[i]);
+        vectorSizeBlocks[0]=ncells;
         vectorDis[0]=0;
         for(i=1; i<world_size; i++)
-            vectorDis[i] = vectorDis[i-1]+vectorSizeBlocks[i];
+            vectorDis[i] = vectorDis[i-1]+vectorSizeBlocks[i-1];
+        printf("%d is sb of proc 0\n",ncells);
+        vectorSizeBlocks[0]=ncells;
+        for(i=0; i<world_size; i++)
+            printf("[%d] %d %d ",i, vectorSizeBlocks[i], vectorDis[i]);
+        printf("\n");fflush(stdout);
     }
 
     // Scatter of each displacement
     MPI_Scatter(vectorDis, 1, MPI_INT, &displacement, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    printf("[%d] sb: %d, dis:%d, ncells:%d\n",world_rank,size_block,displacement/columns,ncells);fflush(stdout);
+    // printf("[%d] sb: %d, firstrow: %d, dis:%d, ncells:%d\n",world_rank,size_block,displacement/columns,displacement,ncells);fflush(stdout);
 
     if(world_size > 1){
         if( world_rank == 0 ){
@@ -216,23 +224,23 @@ while (0 == iax)
     
     MPI_Scatterv(matrixResult, vectorSizeBlocks, vectorDis, MPI_INT, sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, 0, MPI_COMM_WORLD);
     
-    if(world_rank==0){
-        printf("[%d] Init matrix\n", world_rank);
-        for(i=0; i<rows; ++i){
-            for(j=0; j<columns; ++j){
-                printf("%d ", matrixData[i*columns+j]);
-            }
-            printf("\n");
-        }
-    //     fflush(stdout);
-    //     printf("[%d] Init submatrix\n", world_rank);
-    //     for(i=0; i<size_block; ++i){
+    if(world_rank==4){
+    //     printf("[%d] Init matrix\n", world_rank);
+    //     for(i=0; i<rows; ++i){
     //         for(j=0; j<columns; ++j){
-    //             printf("%d ", sub_matrixResult[i*columns+j]);
+    //             printf("%d ", matrixData[i*columns+j]);
     //         }
     //         printf("\n");
     //     }
     //     fflush(stdout);
+         printf("[%d] Init submatrix\n", world_rank);
+         for(i=0; i<size_block; ++i){
+             for(j=0; j<columns; ++j){
+                 printf("%d ", sub_matrixResult[i*columns+j]);
+             }
+             printf("\n");
+         }
+        fflush(stdout);
     }
 
 	/* 4. Computacion */
@@ -321,7 +329,7 @@ while (0 == iax)
 		    }
 		}
 
-        if(world_rank==0){
+        if(world_rank==4){
             printf("[%d]%d Submatrix result\n",world_rank, t);
             for(i=0; i<size_block; ++i){
                 for(j=0; j<columns; ++j){
