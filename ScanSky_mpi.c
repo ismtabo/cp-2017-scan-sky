@@ -17,39 +17,6 @@
 /* Substituir min por el operador */
 #define min(x,y)    ((x) < (y)? (x) : (y))
 
-/**
-* Funcion secuencial para la busqueda de mi bloque 
-*/
-// int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
-// 	// Inicialmente cojo mi indice
-// 	int result=matrixResultCopy[x*columns+y];
-// 	if( result!= -1){
-// 		//Si es de mi mismo grupo, entonces actualizo
-// 		if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
-// 		{
-// 			result = min (result, matrixResultCopy[(x-1)*columns+y]);
-// 		}
-// 		if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
-// 		{
-// 			result = min (result, matrixResultCopy[(x+1)*columns+y]);
-// 		}
-// 		if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
-// 		{
-// 			result = min (result, matrixResultCopy[x*columns+y-1]);
-// 		}
-// 		if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
-// 		{
-// 			result = min (result, matrixResultCopy[x*columns+y+1]);
-// 		}
-// 
-// 		// Si el indice no ha cambiado retorna 0
-// 		if(matrixResult[x*columns+y] == result){ return 0; }
-// 		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
-// 		else { matrixResult[x*columns+y]=result; return 1;}
-// 		
-// 	}
-// 	return 0; 
-// }
 
 /**
 * Funcion principal
@@ -139,16 +106,6 @@ while (0 == iax)
 		}
 		fclose(f);
 
-		#ifdef WRITE
-			printf("Inicializacion \n");
-			for(i=0;i<rows;i++){
-				for(j=0;j<columns;j++){
-					printf ("%d\t", matrixData[i*(columns)+j]);
-				}
-				printf("\n");
-			}
-		#endif
-
 
 		/* PUNTO DE INICIO MEDIDA DE TIEMPO */
 		t_ini = cp_Wtime();
@@ -161,9 +118,12 @@ while (0 == iax)
     int k;
     int dimensions[3];  // Vector of matrix and submatrix dimensions for communication
     int size_block, ncells;  // Number of rows and number of cells of proc submatrix
+    int displacement; // Displacement of proc at initial matrix
     int vectorSizeBlocks[world_rank], vectorDis[world_rank];  // Vector with number of cells of and displacement for each proc
     int previous, next;  // Rank of previos and next proc 
     int *sub_matrixResultCopy, *sub_matrixResult;  // Proper submatrixes 
+    MPI_Status stat;
+    MPI_Request req;
 
 	if ( world_rank == 0 ) {
 
@@ -178,7 +138,7 @@ while (0 == iax)
 			for(j=0;j< columns; j++){
 				matrixResult[i*(columns)+j]=-1;
 				// Si es 0 se trata del fondo y no lo computamos
-				if(matrixData[i*(columns)+j]!=0){
+				if(matrixData[i*(columns)+j]!=-1&&matrixData[i*(columns)+j]){
 					matrixResult[i*(columns)+j]=i*(columns)+j;
 				}
 			}
@@ -188,22 +148,21 @@ while (0 == iax)
         dimensions[2] = size_block = rows/world_size; 
 
     }
-    if(!world_rank){
+    if(world_rank==0){
+        printf("Matrix\n");
         for(i=0; i<rows; ++i){
             for(j=0; j<columns; ++j){
                 printf("%d ", matrixResult[i*columns+j]);
             }
             printf("\n");
         }
+        fflush(stdout);
     }
-    
-    if(!world_rank) printf("finish start\n");
 
     // Broadcast matrix dimensions
     MPI_Bcast(dimensions, 3, MPI_INT, 0, MPI_COMM_WORLD);
     previous = world_rank - 1; 
     next = world_rank + 1; 
-    if(!world_rank) printf("finish broadcast dim\n");
 
     if( world_rank ){
         rows = dimensions[0];
@@ -217,25 +176,22 @@ while (0 == iax)
     
     // Broadcast of data matrix
     MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
-    if(!world_rank) printf("finish broadcast matrix\n");
 
     ncells = size_block*columns;
-    printf("[%d] ncells<-%d(%dof%dx%d)\n",world_rank,ncells,size_block,rows, columns);fflush(stdout);
 
     // Group number of cells for each proc submatrix
     MPI_Gather(&ncells, 1, MPI_INT, vectorSizeBlocks, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if(!world_rank) printf("finish gather vector ncells\n");
 
     // Calculate displacements
     if(world_rank==0){
         vectorDis[0]=0;
         for(i=1; i<world_size; i++)
             vectorDis[i] = vectorDis[i-1]+vectorSizeBlocks[i];
-        for(i=0; i<world_size; i++)
-            printf("[%d] %d %d ", i, vectorSizeBlocks[i], vectorDis[i]);
-        printf("\n");
     }
-    if(!world_rank) printf("finish calculate vector displacement\n");
+
+    // Scatter of each displacement
+    MPI_Scatter(vectorDis, 1, MPI_INT, &displacement, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    printf("[%d] sb: %d, dis:%d, ncells:%d\n",world_rank,size_block,displacement/columns,ncells);fflush(stdout);
 
     if(world_size > 1){
         if( world_rank == 0 ){
@@ -251,18 +207,33 @@ while (0 == iax)
 
     sub_matrixResult = (int*) malloc(sizeof(int)*size_block*columns);
     sub_matrixResultCopy = (int*) malloc(sizeof(int)*size_block*columns);
-    if(!world_rank) printf("finish malloc sub matrix\n");
+    for(i=0; i<size_block; ++i)
+        for(j=0; j<columns; ++j){
+            sub_matrixResult[i*columns+j]=-1;
+            sub_matrixResultCopy[i*columns+j]=-1;
+        }
+            
     
     MPI_Scatterv(matrixResult, vectorSizeBlocks, vectorDis, MPI_INT, sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, 0, MPI_COMM_WORLD);
-    if(!world_rank) printf("finish scatter matrix\n");
-    //if(!world_rank){
-        for(i=0; i<size_block; ++i){
+    
+    if(world_rank==0){
+        printf("[%d] Init matrix\n", world_rank);
+        for(i=0; i<rows; ++i){
             for(j=0; j<columns; ++j){
-                printf("%d ", sub_matrixResult[i*columns+j]);
+                printf("%d ", matrixData[i*columns+j]);
             }
             printf("\n");
         }
-    //}
+    //     fflush(stdout);
+    //     printf("[%d] Init submatrix\n", world_rank);
+    //     for(i=0; i<size_block; ++i){
+    //         for(j=0; j<columns; ++j){
+    //             printf("%d ", sub_matrixResult[i*columns+j]);
+    //         }
+    //         printf("\n");
+    //     }
+    //     fflush(stdout);
+    }
 
 	/* 4. Computacion */
 	int t=0;
@@ -270,35 +241,46 @@ while (0 == iax)
 	int flagCambio=1; 
 
 	/* 4.2 Busqueda de los bloques similiares */
-    MPI_Barrier(MPI_COMM_WORLD);
 	for(t=0; flagCambio !=0; t++){
 		flagCambio=0; 
     
         if(world_size > 1){
-                // Segment fault at sending on both programs
-                MPI_Isend(&sub_matrixResult[columns], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_REQUEST_NULL);  // Send row #1
-                printf("%d finish send previous communication\n", world_rank);fflush(stdout);
-                MPI_Recv(&sub_matrixResult[(size_block-1)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to last row
-                printf("%d finish previous communication\n", world_rank);fflush(stdout);
-                MPI_Isend(&sub_matrixResult[(size_block-2)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_REQUEST_NULL);  // Send penultimate row1
-                printf("%d finish send next communication\n", world_rank);fflush(stdout);
-                MPI_Recv(&sub_matrixResult[0], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to first row
-                printf("%d finish next communication\n", world_rank);fflush(stdout);
-                // MPI_Irecv(sub_matrixResult, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to first row
-                // MPI_Send(sub_matrixResult+(size_block-2)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD);  // Send penultimate row1
-                // MPI_Irecv(sub_matrixResult+(size_block-1)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); // Wait to last row
-                // MPI_Send(sub_matrixResult+columns, columns, MPI_INT, previous, 0, MPI_COMM_WORLD);  // Send row #1
+            // Segment fault at sending on both programs
+            MPI_Isend(&sub_matrixResult[columns], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &req);  // Send row #1
+            MPI_Recv(&sub_matrixResult[(size_block-1)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, &stat); // Wait to last row
+            MPI_Isend(&sub_matrixResult[(size_block-2)*columns], columns, MPI_INT, next, 0, MPI_COMM_WORLD, &req);  // Send penultimate row1
+            MPI_Recv(&sub_matrixResult[0], columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &stat); // Wait to first row
+
+            // if(world_rank==0){
+            //     printf("[%d]%d Submatrix\n",world_rank, t);
+            //     for(i=0; i<size_block; ++i){
+            //         for(j=0; j<columns; ++j){
+            //             printf("%d ", sub_matrixResult[i*columns+j]);
+            //         }
+            //         printf("\n");
+            //     }
+            //     fflush(stdout);
+            // }
         }
-        //añadie mpi wait para los dos request?
-        printf("%d finish communication\n", world_rank);fflush(stdout);
+
 		/* 4.2.1 Actualizacion copia */
-		for(i=1;i<size_block-1;i++){
-			for(j=1;j<columns-1;j++){
+		for(i=0;i<size_block;i++){
+			for(j=0;j<columns;j++){
 				if(sub_matrixResult[i*(columns)+j]!=-1){
 					sub_matrixResultCopy[i*(columns)+j]=sub_matrixResult[i*(columns)+j];
 				}
 			}
 		}
+        // if(world_rank==0){
+        //     printf("[%d]%d Submatrix copy\n",world_rank, t);
+        //     for(i=0; i<size_block; ++i){
+        //         for(j=0; j<columns; ++j){
+        //             printf("%d ", sub_matrixResultCopy[i*columns+j]);
+        //         }
+        //         printf("\n");
+        //     }
+        //     fflush(stdout);
+        // }
 
 		/* 4.2.2 Computo y detecto si ha habido cambios */
 		for(i=1;i<size_block-1;i++){
@@ -307,23 +289,26 @@ while (0 == iax)
 
     			int result,sol;
                 j=i*columns+k;
-    			result=sub_matrixResultCopy[j];
+                int dataj = (world_rank==0?i:i-1)*columns+k+displacement;
+                result = sub_matrixResultCopy[j];
+                // if(world_rank==0) printf("smRC[%d][%d]=%d\n",i,k,result);
+                // if(world_rank==0) printf("data[%d][%d]=%d\n",dataj/columns,dataj%columns,matrixData[dataj]);
     			sol=0;
                 if(result!=-1){
     		    	//Si es de mi mismo grupo, entonces actualizo
-    		        if(matrixData[j-columns] == matrixData[j])
+    		        if(matrixData[dataj-columns] == matrixData[dataj])
     		        {
     		            result = min (result, sub_matrixResultCopy[j-columns]);
     		        }
-    		        if(matrixData[j+columns] == matrixData[j])
+    		        if(matrixData[dataj+columns] == matrixData[dataj])
     		        {
     		            result = min (result, sub_matrixResultCopy[j+columns]);
     		        }
-    		        if(matrixData[j-1] == matrixData[j])
+    		        if(matrixData[dataj-1] == matrixData[dataj])
     		        {
     		            result = min (result, sub_matrixResultCopy[j-1]);
     		        }
-    		        if(matrixData[j+1] == matrixData[j])
+    		        if(matrixData[dataj+1] == matrixData[dataj])
     		        {
     		            result = min (result, sub_matrixResultCopy[j+1]);
     		        }
@@ -336,19 +321,17 @@ while (0 == iax)
 		    }
 		}
 
-		#ifdef DEBUG
-			printf("\nResultados iter %d: \n", t);
-			for(i=0;i<rows;i++){
-				for(j=0;j<columns;j++){
-					printf ("%d\t", matrixResult[i*columns+j]);
-				}
-				printf("\n");
-			}
-		#endif
-        
-        MPI_Allreduce(MPI_IN_PLACE, &flagCambio, 0, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-
-        if(!world_rank) printf("finish iteration #%d flagCambio:%d\n", t, flagCambio);
+        if(world_rank==0){
+            printf("[%d]%d Submatrix result\n",world_rank, t);
+            for(i=0; i<size_block; ++i){
+                for(j=0; j<columns; ++j){
+                    printf("%d ", sub_matrixResult[i*columns+j]);
+                }
+                printf("\n");
+            }
+            fflush(stdout);
+        }
+        MPI_Allreduce(MPI_IN_PLACE, &flagCambio, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 	}
 
     MPI_Gatherv(sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, matrixResult, vectorSizeBlocks, vectorDis, MPI_INT, 0, MPI_COMM_WORLD);   
@@ -356,6 +339,13 @@ while (0 == iax)
     if(world_rank==0)
     {
 		/* 4.3 Inicio cuenta del numero de bloques */
+        printf("Matrix result\n");
+    	for(i=0;i<rows;i++){
+    		for(j=0;j<columns;j++){
+    			printf ("%d\t", matrixResult[i*columns+j]);
+    		}
+    		printf("\n");
+    	}
 		numBlocks=0;
 		for(i=1;i<rows-1;i++){
 			for(j=1;j<columns-1;j++){
