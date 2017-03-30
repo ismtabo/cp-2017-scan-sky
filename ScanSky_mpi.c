@@ -87,7 +87,7 @@ int main (int argc, char* argv[])
 		}
 		for(i=1;i<columns-1;i++){
 			matrixData[0*(columns)+i]=0;
-			matrixData[(columns-1)*(columns)+i]=0;
+			matrixData[(rows-1)*(columns)+i]=0;
 		}
 		/* 2.6 Relleno la matriz con los datos del fichero */
 		for(i=1;i<rows-1;i++){
@@ -129,7 +129,7 @@ int main (int argc, char* argv[])
 			for(j=0;j< columns; j++){
 				matrixResult[i*(columns)+j]=-1;
 				// Si es 0 se trata del fondo y no lo computamos
-				if(matrixData[i*(columns)+j]!=-1&&matrixData[i*(columns)+j]){
+				if(matrixData[i*(columns)+j]!=0){
 					matrixResult[i*(columns)+j]=i*(columns)+j;
 				}
 			}
@@ -165,7 +165,7 @@ int main (int argc, char* argv[])
     }
     
     if( world_rank == world_size-1)
-        size_block += columns % world_size;
+        size_block += rows - size_block*world_size;
     
     // Broadcast of data matrix
     MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);

@@ -126,7 +126,7 @@ int main (int argc, char* argv[])
 		}
 		for(i=1;i<columns-1;i++){
 			matrixData[0*(columns)+i]=0;
-			matrixData[(columns-1)*(columns)+i]=0;
+			matrixData[(rows-1)*(columns)+i]=0;
 		}
 		/* 2.6 Relleno la matriz con los datos del fichero */
 		for(i=1;i<rows-1;i++){
