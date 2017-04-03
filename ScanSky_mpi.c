@@ -155,10 +155,6 @@ int main (int argc, char* argv[])
     #endif
 
     // Broadcast matrix dimensions
-    // TODO: Change Bcast into scatter of:
-    // - proper submatrix
-    // - first rows for each process
-    // - last row for each process
     MPI_Bcast(dimensions, 3, MPI_INT, 0, MPI_COMM_WORLD);
     previous = world_rank - 1; 
     next = world_rank + 1; 
@@ -174,6 +170,10 @@ int main (int argc, char* argv[])
         size_block += rows - size_block*world_size;
     
     // Broadcast of data matrix
+    // TODO: Change Bcast into scatter of:
+    // - proper submatrix
+    // - first rows for each process
+    // - last row for each process
     MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
 
     ncells = size_block*columns;
