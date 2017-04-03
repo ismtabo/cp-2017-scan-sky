@@ -112,6 +112,7 @@ int main (int argc, char* argv[])
     int displacement; // Displacement of proc at initial matrix
     int vectorSizeBlocks[world_size], vectorDis[world_size];  // Vector with number of cells of and displacement for each proc
     int previous, next;  // Rank of previos and next proc 
+    // TODO: Add submatrix structure for matrixData
     int *sub_matrixResultCopy, *sub_matrixResult;  // Proper submatrixes 
     MPI_Status stat;
     MPI_Request req;
@@ -136,6 +137,7 @@ int main (int argc, char* argv[])
 		}
         dimensions[0] = rows;
         dimensions[1] = columns;
+        // TODO: Change function to balance deal
         dimensions[2] = size_block = rows/world_size; 
 
     }
@@ -153,6 +155,10 @@ int main (int argc, char* argv[])
     #endif
 
     // Broadcast matrix dimensions
+    // TODO: Change Bcast into scatter of:
+    // - proper submatrix
+    // - first rows for each process
+    // - last row for each process
     MPI_Bcast(dimensions, 3, MPI_INT, 0, MPI_COMM_WORLD);
     previous = world_rank - 1; 
     next = world_rank + 1; 
@@ -179,6 +185,9 @@ int main (int argc, char* argv[])
     if(world_rank==0){
         vectorDis[0] = 0;
         for(i=1; i<world_size; i++)
+            // TODO: Calculate displacements for:
+            // - Scatter of first rows
+            // - Scatter of last rows
             vectorDis[i] = vectorDis[i-1]+vectorSizeBlocks[i-1];
 
         #ifdef DEBUG
