@@ -113,8 +113,8 @@ int main (int argc, char* argv[])
     int vectorRows[world_size], vectorSizes[world_size], vectorDis[world_size];  // Vector with number of rows, number of cells of and displacement for each proc
     int previous, next;  // Rank of previos and next proc 
     int *sub_matrixData, *sub_matrixResult, *sub_matrixResultCopy;  // Proper submatrixes 
-    MPI_Status stat;
-    MPI_Request req;
+    MPI_Status stat[2];
+    MPI_Request reqs[2];
 
     // Calculate previous and next procs' ranks
     previous = world_rank - 1; 
@@ -289,11 +289,11 @@ int main (int argc, char* argv[])
     
         if(world_size > 1){
             // Segment fault at sending on both programs
-            MPI_Isend(sub_matrixResult+columns, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &req);  // Send row #1 to previous proc
-            MPI_Recv(sub_matrixResult+(sub_rows-1)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &stat);  // Wait to last row from next proc
-            MPI_Isend(sub_matrixResult+(sub_rows-2)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &req);  // Send penultimate row to next proc
-            MPI_Recv(sub_matrixResult, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &stat);  // Wait to first row from previous proc
-
+            MPI_Isend(sub_matrixResult+columns, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &reqs[0]);  // Send row #1 to previous proc
+            MPI_Isend(sub_matrixResult+(sub_rows-2)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &reqs[1]);  // Send penultimate row to next proc
+            MPI_Irecv(sub_matrixResultCopy+(sub_rows-1)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &reqs[0]);  // Wait to last row from next proc
+            MPI_Irecv(sub_matrixResultCopy, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &reqs[1]);  // Wait to first row from previous pro
+	    
             #ifdef DEBUG
             if(world_rank==0){
                 printf("[%d]%d Submatrix\n",world_rank, t);
@@ -309,13 +309,16 @@ int main (int argc, char* argv[])
         }
 
 		/* 4.2.1 Actualizacion copia */
-		for(i=0;i<sub_rows;i++){
-			for(j=0;j<columns;j++){
+		for(i=1;i<sub_rows-1;i++){
+			for(j=1;j<columns-1;j++){
 				if(sub_matrixResult[i*(columns)+j]!=-1){
 					sub_matrixResultCopy[i*(columns)+j]=sub_matrixResult[i*(columns)+j];
 				}
 			}
 		}
+	if(world_size > 1){
+		MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+	}
         #ifdef DEBUG
         if(world_rank==0){
             printf("[%d]%d Submatrix copy\n",world_rank, t);
