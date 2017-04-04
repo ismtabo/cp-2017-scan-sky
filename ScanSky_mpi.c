@@ -181,7 +181,7 @@ int main (int argc, char* argv[])
         // Calculate vector of rows for each proc with borders
         for(i=0; i<world_size; i++)
             vectorRows[i] = rows/world_size;
-        vectorRows[world_size-1] += rows - rows/world_size*world_size;
+        vectorRows[world_size-1] += rows - (rows/world_size)*world_size;
          
         // Calculate number of cells for each process
         for(i=0; i<world_size; i++)
@@ -190,7 +190,7 @@ int main (int argc, char* argv[])
         // Calculate displacements for each process
         vectorDis[0] = 0;
         for(i=1; i<world_size; i++)
-            vectorDis[i] = vectorDis[i-1]+vectorSizes[i];
+            vectorDis[i] = vectorDis[i-1]+vectorSizes[i-1];
         
         #ifdef DEBUG
         for(i=0; i<world_size; i++)
