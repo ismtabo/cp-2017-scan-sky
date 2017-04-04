@@ -106,19 +106,18 @@ int main (int argc, char* argv[])
 	// EL CODIGO A PARALELIZAR COMIENZA AQUI
 	//
 
-    int k;
-    int dimensions[2];  // Vector of matrix dimensions for communication
-    int sub_rows, ncells;  // Number of rows and number of cells of proc submatrix
-    int displacement; // Displacement of proc at initial matriX
-    int vectorRows[world_size], vectorSizes[world_size], vectorDis[world_size];  // Vector with number of rows, number of cells of and displacement for each proc
-    int previous, next;  // Rank of previos and next proc 
-    int *sub_matrixData, *sub_matrixResult, *sub_matrixResultCopy;  // Proper submatrixes 
-    MPI_Status stat[2];
-    MPI_Request reqs[2];
+    	int k;
+    	int dimensions[2];  // Vector of matrix dimensions for communication
+    	int sub_rows, displacement, ncells;  // Number of rows, displacement and number of cells of proc
+    	int vectorRows[world_size], vectorSizes[world_size], vectorDis[world_size];  // Vector with number of rows, number of cells of and displacement for each proc
+    	int previous, next;  // Rank of previos and next proc 
+    	int *sub_matrixData, *sub_matrixResult, *sub_matrixResultCopy;  // Proper submatrixes 
+    	MPI_Status stats[2];
+    	MPI_Request reqs[2];
 
-    // Calculate previous and next procs' ranks
-    previous = world_rank - 1; 
-    next = world_rank + 1; 
+    	// Calculate previous and next procs' ranks
+    	previous = world_rank - 1; 
+    	next = world_rank + 1; 
 
 	if ( world_rank == 0 ) {
 
@@ -291,18 +290,17 @@ int main (int argc, char* argv[])
 	/* 4. Computacion */
 	int t=0;
 	/* 4.1 Flag para ver si ha habido cambios y si se continua la ejecucion */
-	int flagCambio=1; 
+	int flagCambio=1, flagCambioGlobal=1; 
 
 	/* 4.2 Busqueda de los bloques similiares */
-	for(t=0; flagCambio !=0; t++){
-		flagCambio=0; 
+	for(t=0; flagCambioGlobal !=0; t++){
     
         if(world_size > 1){
             // Segment fault at sending on both programs
-            MPI_Isend(sub_matrixResult+columns, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &reqs[0]);  // Send row #1 to previous proc
-            MPI_Isend(sub_matrixResult+(sub_rows-2)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &reqs[1]);  // Send penultimate row to next proc
-            MPI_Irecv(sub_matrixResultCopy+(sub_rows-1)*columns, columns, MPI_INT, next, 0, MPI_COMM_WORLD, &reqs[0]);  // Wait to last row from next proc
-            MPI_Irecv(sub_matrixResultCopy, columns, MPI_INT, previous, 0, MPI_COMM_WORLD, &reqs[1]);  // Wait to first row from previous pro
+            MPI_Isend(sub_matrixResult+columns, columns, MPI_INT, previous, flagCambio, MPI_COMM_WORLD, &reqs[0]);  // Send row #1 to previous proc
+            MPI_Isend(sub_matrixResult+(sub_rows-2)*columns, columns, MPI_INT, next, flagCambio, MPI_COMM_WORLD, &reqs[1]);  // Send penultimate row to next proc
+            MPI_Irecv(sub_matrixResultCopy+(sub_rows-1)*columns, columns, MPI_INT, next, MPI_ANY_TAG, MPI_COMM_WORLD, &reqs[0]);  // Wait to last row from next proc
+            MPI_Irecv(sub_matrixResultCopy, columns, MPI_INT, previous, MPI_ANY_TAG, MPI_COMM_WORLD, &reqs[1]);  // Wait to first row from previous pro
 	    
             #ifdef DEBUG
             if(world_rank==0){
@@ -327,7 +325,7 @@ int main (int argc, char* argv[])
 			}
 		}
 	if(world_size > 1){
-		MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+		MPI_Waitall(2, reqs, stats);
 	}
         #ifdef DEBUG
         if(world_rank==0){
@@ -341,7 +339,9 @@ int main (int argc, char* argv[])
             fflush(stdout);
         }
         #endif
-
+	
+	if(flagCambio || stats[0].MPI_TAG || stats[1].MPI_TAG){
+		flagCambio=0; 
 		/* 4.2.2 Computo y detecto si ha habido cambios */
 		for(i=1;i<sub_rows-1;i++){
 			for(k=1;k<columns-1;k++){
@@ -372,10 +372,11 @@ int main (int argc, char* argv[])
     		        if(sub_matrixResult[j] == result){ sol=0; }
     		        // Si el indice cambia, actualizo matrixResult de resultados con el indice adecuado y retorno 1
     		        else { sub_matrixResult[j]=result; sol=1;}
-    		        flagCambio= flagCambio+ sol;
+    		        flagCambio|=sol;
                 }
 		    }
 		}
+	}
 
         #ifdef DEBUG
         if(world_rank==0){
@@ -390,7 +391,7 @@ int main (int argc, char* argv[])
         }
         #endif
 
-        MPI_Allreduce(MPI_IN_PLACE, &flagCambio, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(&flagCambio, &flagCambioGlobal, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
 	}
 
     // MPI_Gatherv(sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, matrixResult, vectorSizes, vectorDis, MPI_INT, 0, MPI_COMM_WORLD);   
