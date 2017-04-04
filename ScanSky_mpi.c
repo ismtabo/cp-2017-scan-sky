@@ -109,7 +109,7 @@ int main (int argc, char* argv[])
     int k;
     int dimensions[2];  // Vector of matrix dimensions for communication
     int sub_rows, ncells;  // Number of rows and number of cells of proc submatrix
-    int displacement; // Displacement of proc at initial matrix
+    int displacement; // Displacement of proc at initial matriX
     int vectorRows[world_size], vectorSizes[world_size], vectorDis[world_size];  // Vector with number of rows, number of cells of and displacement for each proc
     int previous, next;  // Rank of previos and next proc 
     int *sub_matrixData, *sub_matrixResult, *sub_matrixResultCopy;  // Proper submatrixes 
@@ -173,7 +173,11 @@ int main (int argc, char* argv[])
         columns = dimensions[1];
     }
 
+    // FIXME: Avoid working with world_rank > row / 2
+    // due to size of submatrix less than 2
+
     if( world_rank == 0){
+        // FIXME: Incorrect way to calculate displacements
         // Calculate vector of rows for each proc with borders
         for(i=0; i<world_size; i++)
             vectorRows[i] = rows/world_size;
@@ -243,11 +247,8 @@ int main (int argc, char* argv[])
     sub_matrixResultCopy = (int*) malloc(sizeof(int)*sub_rows*columns);
     
     // Broadcast of data matrix
-    // TODO: Change Bcast into scatter of:
-    // - proper submatrix
-    // - first rows for each process
-    // - last row for each process
     // MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
+    // FIXME: Unproper way to scatter matrix
     MPI_Scatterv(matrixData, vectorSizes, vectorDis, MPI_INT, sub_matrixData, ncells, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Scatterv(matrixResult, vectorSizes, vectorDis, MPI_INT, sub_matrixResult, ncells, MPI_INT, 0, MPI_COMM_WORLD);
 
