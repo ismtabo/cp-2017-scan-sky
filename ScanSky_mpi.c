@@ -129,7 +129,7 @@ int main (int argc, char* argv[])
 			perror ("Error reservando memoria");
 			return -1;
 		}
-		for(i=0;i< rows; i++){
+		/*for(i=0;i< rows; i++){
 			for(j=0;j< columns; j++){
 				matrixResult[i*(columns)+j]=-1;
 				// Si es 0 se trata del fondo y no lo computamos
@@ -137,7 +137,7 @@ int main (int argc, char* argv[])
 					matrixResult[i*(columns)+j]=i*(columns)+j;
 				}
 			}
-		}
+		}*/
         // Pack dimensions of matrix
         dimensions[0] = rows;
         dimensions[1] = columns;
@@ -153,13 +153,13 @@ int main (int argc, char* argv[])
         }
         fflush(stdout);
         printf("Matrix\n");
-        for(i=0; i<rows; ++i){
+        /*for(i=0; i<rows; ++i){
             for(j=0; j<columns; ++j){
                 printf("%d ", matrixResult[i*columns+j]);
             }
             printf("\n");
         }
-        fflush(stdout);
+        fflush(stdout);*/
         #endif
     }
 
@@ -179,10 +179,13 @@ int main (int argc, char* argv[])
     if( world_rank == 0){
         // FIXME: Incorrect way to calculate displacements
         // Calculate vector of rows for each proc with borders
+
         for(i=0; i<world_size; i++)
-            vectorRows[i] = rows/world_size;
-        vectorRows[world_size-1] += rows - (rows/world_size)*world_size;
-         
+		vectorRows[i] = rows/world_size+(i < rows%world_size? 1: 0);
+	/*
+            vectorRows[i] = rows/world_size+(rows*world_size%world_size);
+        vectorRows[world_size-1] += rows - ( rows/world_size+(rows*world_size%world_size))*world_size;
+         */
         // Calculate number of cells for each process
         for(i=0; i<world_size; i++)
             vectorSizes[i] = vectorRows[i]*columns;
@@ -250,12 +253,19 @@ int main (int argc, char* argv[])
     // MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
     // FIXME: Unproper way to scatter matrix
     MPI_Scatterv(matrixData, vectorSizes, vectorDis, MPI_INT, sub_matrixData, ncells, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Scatterv(matrixResult, vectorSizes, vectorDis, MPI_INT, sub_matrixResult, ncells, MPI_INT, 0, MPI_COMM_WORLD);
+    //MPI_Scatterv(matrixResult, vectorSizes, vectorDis, MPI_INT, sub_matrixResult, ncells, MPI_INT, 0, MPI_COMM_WORLD);
 
     // Fill submatrix for ResultCopy with -1
-    for(i=0; i<sub_rows; ++i)
-        for(j=0; j<columns; ++j)
+    for(i=0; i<sub_rows; ++i){
+        for(j=0; j<columns; ++j){
             sub_matrixResultCopy[i*columns+j]=-1;
+	    sub_matrixResult[i*(columns)+j]=-1;
+	    // Si es 0 se trata del fondo y no lo computamos
+	    if(sub_matrixData[i*(columns)+j]!=0){
+		sub_matrixResult[i*(columns)+j]=(world_rank==0?i:i-1)*columns+j+displacement;
+	    }
+	}
+    }
     
     #ifdef DEBUG
     if(world_rank==1){
