@@ -181,7 +181,7 @@ int main (int argc, char* argv[])
     
     previous = (i-1 >= 0)? new_ranks[i-1] : MPI_PROC_NULL;
     next = (i+1 < world_size)? new_ranks[i+1] : MPI_PROC_NULL;
-    printf("[%d] %d p %d n %d", world_rank, i, previous, next);
+    printf("[%d] %d p %d n %d\n", world_rank, i, previous, next);fflush(stdout);
 
     if ( world_rank == 0 ) {
         /* 3. Etiquetado inicial */
@@ -299,14 +299,14 @@ int main (int argc, char* argv[])
     // Calculate number of cells for each submatrix
     ncells = sub_rows*columns;
 
-    if(world_size > 1){
-        // Assign MPI_PROC_NULL wildcards for communications at first and last proc
-        if( world_rank == 0 ){
-            previous = MPI_PROC_NULL;
-        } else if( world_rank == world_size-1) {
-            next = MPI_PROC_NULL; 
-        }
-    }
+    // if(world_size > 1){
+    //     // Assign MPI_PROC_NULL wildcards for communications at first and last proc
+    //     if( world_rank == 0 ){
+    //         previous = MPI_PROC_NULL;
+    //     } else if( world_rank == world_size-1) {
+    //         next = MPI_PROC_NULL; 
+    //     }
+    // }
 
     // Scatter each displacement
     MPI_Scatter(vectorDis, 1, MPI_INT, &displacement, 1, MPI_INT, 0, MPI_COMM_WORLD);
