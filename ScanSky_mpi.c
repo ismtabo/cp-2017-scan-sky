@@ -11,6 +11,7 @@
 #include <time.h>
 #include "cputils.h"
 #include <mpi.h>
+#include <string.h>
 
 
 /* Substituir min por el operador */
@@ -110,6 +111,10 @@ int main (int argc, char* argv[])
     int dimensions[2];  // Vector of matrix dimensions for communication
     int sub_rows, displacement, ncells;  // Number of rows, displacement and number of cells of proc
     int vectorRows[world_size], vectorSizes[world_size], vectorDis[world_size];  // Vector with number of rows, number of cells of and displacement for each proc
+    int namelen, namelens[world_size];
+    char name[MPI_MAX_PROCESSOR_NAME], names[world_size][MPI_MAX_PROCESSOR_NAME];
+    int contIndex;
+    int new_ranks[world_size];
     int previous, next;  // Rank of previos and next proc 
     int *sub_matrixData, *sub_matrixResult, *sub_matrixResultCopy;  // Proper submatrixes 
     MPI_Status stats[2];
@@ -119,8 +124,63 @@ int main (int argc, char* argv[])
     previous = world_rank - 1; 
     next = world_rank + 1; 
 
-    if ( world_rank == 0 ) {
+    MPI_Get_processor_name(name, &namelen);
+    MPI_Gather(&namelen, 1, MPI_INT, namelens, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, names, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
 
+    if ( world_rank == 0) {
+        // Group ranks by name of processor
+        int start, next_start;
+        char actual_proccesor[MPI_MAX_PROCESSOR_NAME];
+        contIndex = 0;
+        next_start = 0;
+        strcpy(names[1], "ultron0x01");
+        do {
+            start = next_start;
+            next_start = 0;
+            new_ranks[contIndex++] = start;
+            strcpy(actual_proccesor, names[start]);
+#ifdef DEBUG
+            printf("Actual: %s %d looking into %d\n", actual_proccesor, start, world_size);fflush(stdout);
+#endif
+            for(i=start+1; i<world_size; i++){
+#ifdef DEBUG
+                printf("CMP for %s %d\n", actual_proccesor, i);fflush(stdout);
+#endif
+                if(strcmp(names[i],"")!=0 && strcmp(actual_proccesor, names[i])==0){
+                    new_ranks[contIndex++] = i;                     
+#ifdef DEBUG
+                    printf("Same %s %s\n", actual_proccesor, names[i]);fflush(stdout);
+#endif
+                    strcpy(names[i],""); 
+                } else if(strcmp(names[i], "")!=0){
+                    if(!next_start)
+                        next_start = i;
+#ifdef DEBUG
+                    printf("Diff %s %s\n", actual_proccesor, names[i]);fflush(stdout);
+#endif
+                } 
+                printf("Compared %d\n", i);fflush(stdout);
+            } 
+#ifdef DEBUG
+            printf("Found all for %s\n", actual_proccesor);fflush(stdout);
+#endif
+        } while(next_start);
+#ifdef DEBUG
+        printf("New ranks: \n");
+        for(i = 0; i < world_size; i++)
+            printf("[%d]%d ", i, new_ranks[i]);
+        printf("\n");fflush(stdout);
+#endif
+    } 
+
+    MPI_Bcast(new_ranks, world_size, MPI_INT, 0, MPI_COMM_WORLD);
+    for(i = 0; world_rank!=new_ranks[i]; i++){}
+    
+    previous = (i-1 >= 0)? new_ranks[i-1] : MPI_PROC_NULL;
+    next = (i+1 < world_size)? new_ranks[i+1] : MPI_PROC_NULL;
+
+    if ( world_rank == 0 ) {
         /* 3. Etiquetado inicial */
         matrixResult= (int *)malloc( (rows)*(columns) * sizeof(int) );
         matrixResultCopy= (int *)malloc( (rows)*(columns) * sizeof(int) );
@@ -172,48 +232,63 @@ int main (int argc, char* argv[])
         columns = dimensions[1];
     }
 
-    // FIXME: Avoid working with world_rank > row / 2
-    // due to size of submatrix less than 2
-
     if( world_rank == 0){
         // FIXME: Incorrect way to calculate displacements
         // Calculate vector of rows for each proc with borders
 
-        for(i=0; i<world_size; i++)
-            vectorRows[i] = rows/world_size+(i < rows%world_size? 1: 0);
+        for(i=0; i<world_size; i++){
+            j = new_ranks[i];
+            vectorRows[j] = rows/world_size+(i < rows%world_size? 1: 0);
+        }
         /*
            vectorRows[i] = rows/world_size+(rows*world_size%world_size);
            vectorRows[world_size-1] += rows - ( rows/world_size+(rows*world_size%world_size))*world_size;
          */
         // Calculate number of cells for each process
-        for(i=0; i<world_size; i++)
+        for(i=0; i<world_size; i++){
             vectorSizes[i] = vectorRows[i]*columns;
+        }
 
         // Calculate displacements for each process
         vectorDis[0] = 0;
-        for(i=1; i<world_size; i++)
-            vectorDis[i] = vectorDis[i-1]+vectorSizes[i-1];
+        for(i=1; i<world_size; i++){
+            j = new_ranks[i];
+            vectorDis[j] = vectorDis[new_ranks[i-1]]+vectorSizes[new_ranks[i-1]];
+        }
 
 #ifdef DEBUG
         for(i=0; i<world_size; i++)
-            printf("[%d] r %d d %d s %d",i, vectorRows[i], vectorDis[i], vectorSizes[i]);
+            printf("#%d[%d] r %d d %d s %d",i, new_ranks[i], vectorRows[new_ranks[i]], vectorDis[new_ranks[i]], vectorSizes[new_ranks[i]]);
         printf("\n");fflush(stdout);
 #endif
 
         if( world_size > 1){
             // Update vector of rows for each proc with borders
             vectorRows[0] += 1;
-            vectorRows[world_size-1] += 1;
-            for(i=1; i<world_size-1; i++)
-                vectorRows[i] += 2;
+            vectorRows[new_ranks[world_size-1]] += 1;
+            for(i=1; i<world_size-1; i++){
+                j = new_ranks[i];
+                vectorRows[j] += 2;
+            }
 
         }
 
         // Update number of cells for each process
-        for(i=0; i<world_size; i++)
+        for(i=0; i<world_size; i++){
+            j = new_ranks[i];
             vectorSizes[i] = vectorRows[i]*columns;
+        }
 
     }
+
+    // TODO: Avoid this communication. Proposal:
+    // 1. Each proc calculate its number of rows(`sub_rows`) by knowing `rows` and `world_rank`
+    // 2. Allgather of `sub_rows` into `vectorRows`, which its in all procs but only used in rank=0.
+    // 3. Each proc calculate `displacement` knowing `sub_rows` of procs from rank=0 to rank=previous.
+    //    3.1. rank=0 stays calculating vectorSizes and vectorDis
+    // 4. Avoid Scatter of `displacement` as each proc already knows it.
+    // 5. Each proc update number of `sub_rows` with borders.
+    // 6. Each proc calculate ncells, which has to be equal as `vectorSizes[rank]` at rank=0.
 
     // Scatter number of rows for each proc
     MPI_Scatter(vectorRows, 1, MPI_INT, &sub_rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -239,7 +314,7 @@ int main (int argc, char* argv[])
             vectorDis[i] -= columns;
 #ifdef DEBUG
         for(i=0; i<world_size; i++)
-            printf("[%d] r %d d %d s %d ",i, vectorRows[i], vectorDis[i], vectorSizes[i]);
+            printf("#%d[%d] r %d d %d s %d",i, new_ranks[i], vectorRows[new_ranks[i]], vectorDis[new_ranks[i]], vectorSizes[new_ranks[i]]);
         printf("\n");fflush(stdout);
 #endif
     }
@@ -250,8 +325,9 @@ int main (int argc, char* argv[])
 
     // Broadcast of data matrix
     // MPI_Bcast(matrixData, rows*columns, MPI_INT, 0, MPI_COMM_WORLD);
-    // FIXME: Unproper way to scatter matrix
     MPI_Scatterv(matrixData, vectorSizes, vectorDis, MPI_INT, sub_matrixData, ncells, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    // FIXME: Unused
     //MPI_Scatterv(matrixResult, vectorSizes, vectorDis, MPI_INT, sub_matrixResult, ncells, MPI_INT, 0, MPI_COMM_WORLD);
 
     // Fill submatrix for ResultCopy with -1
@@ -267,7 +343,7 @@ int main (int argc, char* argv[])
     }
 
 #ifdef DEBUG
-    if(world_rank==1){
+    if(world_rank==0){
         printf("[%d] Init submatrix of Data\n", world_rank);
         for(i=0; i<sub_rows; ++i){
             for(j=0; j<columns; ++j){
