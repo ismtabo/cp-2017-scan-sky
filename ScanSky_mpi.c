@@ -160,25 +160,28 @@ int main (int argc, char* argv[])
                     printf("Diff %s %s\n", actual_proccesor, names[i]);fflush(stdout);
 #endif
                 } 
+#ifdef DEBUG
                 printf("Compared %d\n", i);fflush(stdout);
+#endif
             } 
 #ifdef DEBUG
             printf("Found all for %s\n", actual_proccesor);fflush(stdout);
 #endif
         } while(next_start);
-#ifdef DEBUG
+//#ifdef DEBUG
         printf("New ranks: \n");
         for(i = 0; i < world_size; i++)
             printf("[%d]%d ", i, new_ranks[i]);
         printf("\n");fflush(stdout);
-#endif
+//#endif
     } 
 
     MPI_Bcast(new_ranks, world_size, MPI_INT, 0, MPI_COMM_WORLD);
-    for(i = 0; world_rank!=new_ranks[i]; i++){}
+    for(i = 0; world_rank!=new_ranks[i] && i < world_size; i++){}
     
     previous = (i-1 >= 0)? new_ranks[i-1] : MPI_PROC_NULL;
     next = (i+1 < world_size)? new_ranks[i+1] : MPI_PROC_NULL;
+    printf("[%d] %d p %d n %d", world_rank, i, previous, next);
 
     if ( world_rank == 0 ) {
         /* 3. Etiquetado inicial */
@@ -370,11 +373,14 @@ int main (int argc, char* argv[])
 
     /* 4.2 Busqueda de los bloques similiares */
     for(t=0; flagCambioGlobal !=0; t++){
+        printf("Init %d #%d\n", world_rank, t);
 
         if(world_size > 1){
+            printf("Sending %d #%d %d n %d\n", world_rank, t, previous, next);
             // Segment fault at sending on both programs
             MPI_Isend(sub_matrixResult+columns, columns, MPI_INT, previous, flagCambio, MPI_COMM_WORLD, &reqs[0]);  // Send row #1 to previous proc
             MPI_Isend(sub_matrixResult+(sub_rows-2)*columns, columns, MPI_INT, next, flagCambio, MPI_COMM_WORLD, &reqs[1]);  // Send penultimate row to next proc
+            printf("Receiving %d #%d %d n %d\n", world_rank, t, previous, next);
             MPI_Irecv(sub_matrixResultCopy+(sub_rows-1)*columns, columns, MPI_INT, next, MPI_ANY_TAG, MPI_COMM_WORLD, &reqs[0]);  // Wait to last row from next proc
             MPI_Irecv(sub_matrixResultCopy, columns, MPI_INT, previous, MPI_ANY_TAG, MPI_COMM_WORLD, &reqs[1]);  // Wait to first row from previous pro
 
@@ -400,6 +406,7 @@ int main (int argc, char* argv[])
                 }
             }
         }
+        printf("Waiting %d #%d to %d n %d\n", world_rank, t, previous, next);
         if(world_size > 1){
             MPI_Waitall(2, reqs, stats);
         }
@@ -416,7 +423,11 @@ int main (int argc, char* argv[])
         }
 #endif
 
-        if(flagCambio || stats[0].MPI_TAG || stats[1].MPI_TAG){
+        printf("Let's go %d #%d\n", world_rank, t);
+        if(flagCambio || 
+                (stats[0].MPI_TAG && next!=MPI_PROC_NULL) || 
+                (stats[1].MPI_TAG && previous!=MPI_PROC_NULL)
+                ){
             flagCambio=0; 
             /* 4.2.2 Computo y detecto si ha habido cambios */
             for(i=1;i<sub_rows-1;i++){
@@ -468,6 +479,7 @@ int main (int argc, char* argv[])
 #endif
 
         MPI_Allreduce(&flagCambio, &flagCambioGlobal, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        printf("Finish %d #%d\n", world_rank, t);
     }
 
     // MPI_Gatherv(sub_matrixResult+(world_rank?columns:0), ncells, MPI_INT, matrixResult, vectorSizes, vectorDis, MPI_INT, 0, MPI_COMM_WORLD);   
