@@ -30,7 +30,7 @@ __global__ void update_copy(int rows, int columns, int *matrixResultDev, int *ma
   int col, row;
 	col = blockIdx.x*blockDim.x+threadIdx.x;
 	row = blockIdx.y*blockDim.y+threadIdx.y;
-	if(row < rows && col < columns){
+	if(0 < row && row < rows - 1 && 0 < col && col < columns - 1){
 		if(matrixResultDev[row*(columns)+col]!=-1){
 			matrixResultCopyDev[row*(columns)+col]=matrixResultDev[row*(columns)+col];
 		}
@@ -44,7 +44,7 @@ __global__ void computation(int rows, int columns, int* matrixData, int *matrixR
 	col = blockIdx.x*blockDim.x+threadIdx.x;
 	row = blockIdx.y*blockDim.y+threadIdx.y;
 	// Inicialmente cojo mi indice
-	if (row < rows && col < columns) {
+	if (0 < row && row < rows - 1 && 0 < col && col < columns - 1) {
 		int result=matrixResultCopy[row*columns+col];
 		if( result!= -1){
 			//Si es de mi mismo grupo, entonces actualizo
@@ -168,12 +168,13 @@ int main (int argc, char* argv[])
 //
 
 	/* 3. Etiquetado inicial */
+  cudaError_t error;
 	int *flagCambioArray;
 	matrixResult= (int *)malloc( (rows)*(columns) * sizeof(int) );
 	matrixResultCopy= (int *)malloc( (rows)*(columns) * sizeof(int) );
 	flagCambioArray= (int *)malloc( (rows)*(columns) * sizeof(int) );
 
-	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL)  ) {
+	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL) || (flagCambioArray == NULL) ) {
  		perror ("Error reservando memoria");
 	   	return -1;
 	}
@@ -193,14 +194,43 @@ int main (int argc, char* argv[])
 	int *matrixDataDev;
 	int *flagCambioArrayDev;
 
-	cudaMalloc((void **) &matrixResultDev, rows*(columns) * sizeof(int)  );
-	cudaMalloc((void **) &matrixResultCopyDev, rows*(columns) * sizeof(int) );
-	cudaMalloc((void **) &matrixDataDev, rows*(columns) * sizeof(int)  );
-	cudaMalloc((void **) &flagCambioArrayDev, rows*(columns) * sizeof(int)  );
+  // Reserva de memoria en dispositivo
+  #ifdef ERROR
+  	error = cudaMalloc((void **) &matrixResultDev, rows*(columns) * sizeof(int)  );
+    if ( error != cudaSuccess )
+      printf("ErrCUDA malloc mR: %s\n", cudaGetErrorString( error ) );
+  	error = cudaMalloc((void **) &matrixResultCopyDev, rows*(columns) * sizeof(int) );
+    if ( error != cudaSuccess )
+      printf("ErrCUDA malloc mRC: %s\n", cudaGetErrorString( error ) );
+  	error = cudaMalloc((void **) &matrixDataDev, rows*(columns) * sizeof(int)  );
+    if ( error != cudaSuccess )
+      printf("ErrCUDA malloc mD: %s\n", cudaGetErrorString( error ) );
+  	error = cudaMalloc((void **) &flagCambioArrayDev, rows*(columns) * sizeof(int)  );
+    if ( error != cudaSuccess )
+      printf("ErrCUDA malloc fC: %s\n", cudaGetErrorString( error ) );
+  #else
+    cudaMalloc((void **) &matrixResultDev, rows*(columns) * sizeof(int)  );
+    cudaMalloc((void **) &matrixResultCopyDev, rows*(columns) * sizeof(int) );
+    cudaMalloc((void **) &matrixDataDev, rows*(columns) * sizeof(int)  );
+    cudaMalloc((void **) &flagCambioArrayDev, rows*(columns) * sizeof(int)  );
+  #endif
 
-	cudaMemcpy(matrixResultDev,matrixResult,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(matrixResultCopyDev,matrixResultCopy,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(matrixDataDev,matrixData,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+  // Copia de matrices de anfitrion a dispositivo
+  #ifdef ERROR
+  	error = cudaMemcpy(matrixResultDev,matrixResult,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+    if ( error != cudaSuccess )
+      printf("ErrCUDA cpy mR: %s\n", cudaGetErrorString( error ) );
+  	error = cudaMemcpy(matrixResultCopyDev,matrixResultCopy,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+    if ( error != cudaSuccess )
+      printf("ErrCUDA cpy mRC: %s\n", cudaGetErrorString( error ) );
+  	error = cudaMemcpy(matrixDataDev,matrixData,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+    if ( error != cudaSuccess )
+      printf("ErrCUDA cpy mD: %s\n", cudaGetErrorString( error ) );
+  #else
+    cudaMemcpy(matrixResultDev,matrixResult,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(matrixResultCopyDev,matrixResultCopy,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(matrixDataDev,matrixData,rows*(columns) * sizeof(int), cudaMemcpyHostToDevice);
+  #endif
 
 	int rowblock, colblock;
 	rowblock = colblock = 16;
@@ -231,7 +261,11 @@ int main (int argc, char* argv[])
 		}*/
 		//kernel actualizacion copia
 		update_copy<<<dimGrid, dimBlock>>>(rows, columns, matrixResultDev,matrixResultCopyDev);
-
+    #ifdef ERROR
+      error = cudaGetLastError();
+      if ( error != cudaSuccess )
+        printf("ErrCUDA update_copy: %s\n", cudaGetErrorString( error ) );
+    #endif
 		/* 4.2.2 Computo y detecto si ha habido cambios */
 		/*
 		for(i=1;i<rows-1;i++){
@@ -241,7 +275,20 @@ int main (int argc, char* argv[])
 		}
 		*/
 		computation<<<dimGrid, dimBlock>>>(rows, columns,matrixDataDev,matrixResultDev,matrixResultCopyDev,flagCambioArrayDev);
-		cudaMemcpy(flagCambioArray,flagCambioArrayDev,rows*(columns) * sizeof(int), cudaMemcpyDeviceToHost);
+    #ifdef ERROR
+      error = cudaGetLastError();
+      if ( error != cudaSuccess )
+        printf("ErrCUDA computation: %s\n", cudaGetErrorString( error ) );
+    #endif
+
+    // Copia del array de flagCambio del dispositivo a anfitrion
+    #ifdef ERROR
+      error = cudaMemcpy(flagCambioArray,flagCambioArrayDev,rows*(columns) * sizeof(int), cudaMemcpyDeviceToHost);
+      if ( error != cudaSuccess )
+        printf("ErrCUDA cpy flagCambio: %s\n", cudaGetErrorString( error ) );
+    #else
+      cudaMemcpy(flagCambioArray,flagCambioArrayDev,rows*(columns) * sizeof(int), cudaMemcpyDeviceToHost);
+    #endif
 
 		for(i=0 ;i<rows*columns;i++){
 			flagCambio=flagCambio+flagCambioArray[i];
@@ -259,13 +306,8 @@ int main (int argc, char* argv[])
 
 	}
 
+  // Copia de matriz resultado de dispositivo a anfitrion
 	cudaMemcpy(matrixResult,matrixResultDev,rows*(columns) * sizeof(int), cudaMemcpyDeviceToHost);
-
-	cudaFree(matrixResultDev);
-	cudaFree(matrixResultCopyDev);
-	cudaFree(matrixDataDev);
-	cudaFree(flagCambioArrayDev);
-  free(flagCambioArray);
 
 	/* 4.3 Inicio cuenta del numero de bloques */
 	numBlocks=0;
@@ -274,6 +316,13 @@ int main (int argc, char* argv[])
 			if(matrixResult[i*columns+j] == i*columns+j) numBlocks++;
 		}
 	}
+
+  // Liberacion de estructuras creadas en dispositivo
+	cudaFree(matrixResultDev);
+	cudaFree(matrixResultCopyDev);
+	cudaFree(matrixDataDev);
+	cudaFree(flagCambioArrayDev);
+  free(flagCambioArray);
 
 //
 // EL CODIGO A PARALELIZAR TERMINA AQUI
