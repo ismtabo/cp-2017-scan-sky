@@ -30,7 +30,7 @@ __global__ void update_copy(int rows, int columns, int *matrixResultDev, int *ma
   int col, row;
 	col = blockIdx.x*blockDim.x+threadIdx.x;
 	row = blockIdx.y*blockDim.y+threadIdx.y;
-	if(0 < row && row < rows && 0 < col && col < columns){
+	if(0 < row && row < rows - 1 && 0 < col && col < columns - 1){
 		if(matrixResultDev[row*(columns)+col]!=-1){
 			matrixResultCopyDev[row*(columns)+col]=matrixResultDev[row*(columns)+col];
 		}
@@ -44,7 +44,7 @@ __global__ void computation(int rows, int columns, int* matrixData, int *matrixR
 	col = blockIdx.x*blockDim.x+threadIdx.x;
 	row = blockIdx.y*blockDim.y+threadIdx.y;
 	// Inicialmente cojo mi indice
-	if (0 < row && row < rows && 0 < col && col < columns) {
+	if (0 < row && row < rows - 1 && 0 < col && col < columns - 1) {
 		int result=matrixResultCopy[row*columns+col];
 		if( result!= -1){
 			//Si es de mi mismo grupo, entonces actualizo
