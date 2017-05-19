@@ -20,7 +20,7 @@
 
 /* Substituir min por el operador */
 #define min(x,y)    ((x) < (y)? (x) : (y))
-
+#define T 1024;
 /**
 * Funcion paralela para inicializar la matriz de etiquetas
 */
@@ -124,6 +124,40 @@ int _computation(int x, int y, int columns, int* matrixData, int *matrixResult, 
 	}
 	return 0;
 }
+//funcion paralela reduccion
+__global__ void reduce(int rows, int columns,int *g_idata, int *g_odata) {
+
+    extern __shared__ int sdata[];
+
+    // each thread loads one element from global to shared mem
+    // note use of 1D thread indices (only) in this kernel
+		int i = blockIdx.y*blockDim.y + threadIdx.y;
+    int j = blockIdx.x*blockDim.x + threadIdx.x;
+
+		if(0 < i && i < rows-1 && 0 < j && j < columns-1){
+			sdata[threadIdx.y*blockDim.x+threadIdx.x] = g_idata[i*columns+j];
+		} else {
+			sdata[threadIdx.y*blockDim.x+threadIdx.x] = 0;
+		}
+
+		__syncthreads();
+		// do reduction in shared mem
+		for (int s=1; s < blockDim.x*blockDim.y; s *=2)
+		{
+			int index = 2 * s * (threadIdx.y*blockDim.x + threadIdx.x);
+
+			if (index < blockDim.x*blockDim.y)
+			{
+				sdata[index] += sdata[index + s];
+			}
+			__syncthreads();
+		}
+
+		// write result for this block to global mem
+		if (threadIdx.y==0 && threadIdx.x == 0)
+			atomicAdd(g_odata,sdata[0]);
+
+}
 
 /**
 * Funcion principal
@@ -219,24 +253,28 @@ int main (int argc, char* argv[])
 	cudaError_t error;
 
 	// Vector auxiliar para la persistencia de flagCambio de cada hilo
-	int *flagCambioArray = NULL;
+	int *flagCambioA = NULL;
+	int *flagCambioB = NULL;
 
 	// Vectores auxiliares utilizados en dispositivo
 	int *matrixDataDev = NULL;
 	int *matrixResultDev = NULL;
 	int *matrixResultCopyDev = NULL;
-	int *flagCambioArrayDev = NULL;
+	int *flagCambioADev = NULL;
+	int *flagCambioBDev = NULL;
 
 	cudaMalloc((void **) &matrixDataDev, (rows) * (columns) * sizeof(int));
 	cudaMalloc((void **) &matrixResultDev, (rows) * (columns) * sizeof(int));
 	cudaMalloc((void **) &matrixResultCopyDev, (rows) * (columns) * sizeof(int));
-	cudaMalloc((void **) &flagCambioArrayDev, (rows) * (columns) * sizeof(int));
-
+	cudaMalloc((void **) &flagCambioADev, (rows) * (columns) * sizeof(int));
+	cudaMalloc((void **) &flagCambioBDev, (rows) * (columns) * sizeof(int));
 	/* 3. Etiquetado inicial */
 	matrixResult= (int *)malloc( (rows)*(columns) * sizeof(int) );
 	matrixResultCopy= (int *)malloc( (rows)*(columns) * sizeof(int) );
-	flagCambioArray = (int *)malloc( (rows)*(columns) * sizeof(int) );
-	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL) || (flagCambioArray == NULL)) {
+	flagCambioA = (int *)malloc( (rows)*(columns) * sizeof(int) );
+	flagCambioB = (int *)malloc( (rows)*(columns) * sizeof(int) );
+	flagCambioB[0]=0;
+	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL) || (flagCambioA == NULL) || (flagCambioB == NULL))  {
  		perror ("Error reservando memoria");
 	   	return -1;
 	}
@@ -252,7 +290,7 @@ int main (int argc, char* argv[])
 	// 	}
 	// }
 	int blockDim_x, blockDim_y, gridDim_x, gridDim_y;
-	blockDim_x = 32; blockDim_y = 32;
+	blockDim_x = 32; blockDim_y = 8;
 	gridDim_y = rows / blockDim_y + (rows % blockDim_y ? 1 : 0);
 	gridDim_x = columns / blockDim_x + (columns % blockDim_x ? 1 : 0);
 	dim3 blockDims(blockDim_x, blockDim_y);
@@ -263,7 +301,7 @@ int main (int argc, char* argv[])
 		printf("ErrCUDA cpy mD h2d: %s\n", cudaGetErrorString( error ) );
 
 	// Lanzamiento del kernel
-	init_matrixResult<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioArrayDev);
+	init_matrixResult<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioADev);
 	error = cudaGetLastError();
 	if ( error != cudaSuccess )
 		printf("ErrCUDA init mR d: %s\n", cudaGetErrorString( error ) );
@@ -283,6 +321,8 @@ int main (int argc, char* argv[])
 	/* 4.2 Busqueda de los bloques similiares */
 	for(t=0; flagCambio !=0; t++){
 		flagCambio=0;
+		flagCambioB[0]=0;
+		cudaMemcpy(flagCambioBDev, flagCambioB, sizeof(int), cudaMemcpyHostToDevice);
 
 		/* 4.2.1 Actualizacion copia */
 // Copia de matrices paralelizada por cpy_matrixResult
@@ -313,18 +353,34 @@ int main (int argc, char* argv[])
 		// 		flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
 		// 	}
 		// }
-		computation<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioArrayDev);
+		computation<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioADev);
 		error = cudaGetLastError();
 		if ( error != cudaSuccess )
 			printf("ErrCUDA computation d: %s\n", cudaGetErrorString( error ) );
 
-		error = cudaMemcpy(flagCambioArray, flagCambioArrayDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+
+		reduce<<<gridDims, blockDims, 256*sizeof(int)>>>(rows, columns, flagCambioADev, flagCambioBDev);
+		error = cudaGetLastError();
+		if ( error != cudaSuccess )
+			printf("ErrCUDA reduce d: %s\n", cudaGetErrorString( error ) );
+
+
+		error = cudaMemcpy(flagCambioB, flagCambioBDev, sizeof(int), cudaMemcpyDeviceToHost);
+		if ( error != cudaSuccess )
+			printf("ErrCUDA cpy fCA d2h: %s\n", cudaGetErrorString( error ) );
+
+/*
+		error = cudaMemcpy(flagCambioA, flagCambioADev, rows*columns*sizeof(int), cudaMemcpyDeviceToHost);
 		if ( error != cudaSuccess )
 			printf("ErrCUDA cpy fCA d2h: %s\n", cudaGetErrorString( error ) );
 
 		for(i=0; i<(rows)*(columns); i++){
-			flagCambio = flagCambio + flagCambioArray[i];
+			flagCambio = flagCambio + flagCambioA[i];
 		}
+*/
+		 flagCambio=flagCambioB[0];
+		//flagCambio=0;
+		// printf("flagCambio: %d\n", flagCambioB[0]);
 
 		#ifdef DEBUG
 			printf("\nResultados iter %d: \n", t);
@@ -341,7 +397,7 @@ int main (int argc, char* argv[])
 	// Recuperación de matrixResult en anfitrion
 	error = cudaMemcpy(matrixResult, matrixResultDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
 	if ( error != cudaSuccess )
-		printf("ErrCUDA cpy mR d2h: %s\n", cudaGetErrorString( error ) );
+		printf("ErrCUDA fetch mR d2h: %s\n", cudaGetErrorString( error ) );
 
 	/* 4.3 Inicio cuenta del numero de bloques */
 	numBlocks=0;
@@ -351,7 +407,10 @@ int main (int argc, char* argv[])
 		}
 	}
 
-	free(flagCambioArray);
+	free(flagCambioA);
+	free(flagCambioB);
+
+	//cudaFree();
 //
 // EL CODIGO A PARALELIZAR TERMINA AQUI
 //
