@@ -59,7 +59,7 @@ __global__ void cpy_matrixResult(int rows, int columns, int* matrixResult, int* 
 __global__ void computation(int rows, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy, int *flagCambioArray){
 	int x = blockDim.y * blockIdx.y + threadIdx.y;
 	int y = blockDim.x * blockIdx.x + threadIdx.x;
-	int flagCambio = 0;
+
 
 	if (0 < x && x < rows - 1 && 0 < y && y < columns - 1){
 		// Inicialmente cojo mi indice
