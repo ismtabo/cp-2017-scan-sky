@@ -22,9 +22,79 @@
 #define min(x,y)    ((x) < (y)? (x) : (y))
 
 /**
-* Funcion secuencial para la busqueda de mi bloque 
+* Funcion paralela para inicializar la matriz de etiquetas
 */
-int computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
+__global__ void init_matrixResult(int rows, int columns, int *matrixData, int *matrixResult, int *matrixResultCopy, int *flagCambioArray) {
+	int i = blockDim.y * blockIdx.y + threadIdx.y;
+	int j = blockDim.x * blockIdx.x + threadIdx.x;
+
+	if (0 <= i && i <= rows - 1 && 0 <= j && j <= columns - 1){
+		matrixResultCopy[i*(columns)+j]=-1;
+		matrixResult[i*(columns)+j]=-1;
+		// Si es 0 se trata del fondo y no lo computamos
+		if(matrixData[i*(columns)+j]!=0){
+			matrixResult[i*(columns)+j]=i*(columns)+j;
+		}
+		flagCambioArray[i*(columns)+j]=0;
+	}
+}
+
+/**
+* Funcion paralela para la copia de matrixResult a matrixResultCopy
+*/
+__global__ void cpy_matrixResult(int rows, int columns, int* matrixResult, int* matrixResultCopy) {
+	int i = blockDim.y * blockIdx.y + threadIdx.y;
+	int j = blockDim.x * blockIdx.x + threadIdx.x;
+
+	if (0 <= i && i <= rows - 1 && 0 <= j && j <= columns - 1){
+		if(matrixResult[i*(columns)+j]!=-1){
+			matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
+		}
+	}
+}
+
+/**
+* Funcion paralela para la busqueda de mi bloque
+*/
+__global__ void computation(int rows, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy, int *flagCambioArray){
+	int x = blockDim.y * blockIdx.y + threadIdx.y;
+	int y = blockDim.x * blockIdx.x + threadIdx.x;
+	int flagCambio = 0;
+
+	if (0 < x && x < rows - 1 && 0 < y && y < columns - 1){
+		// Inicialmente cojo mi indice
+		int result=matrixResultCopy[x*columns+y];
+		if( result!= -1){
+			//Si es de mi mismo grupo, entonces actualizo
+			if(matrixData[(x-1)*columns+y] == matrixData[x*columns+y])
+			{
+				result = min (result, matrixResultCopy[(x-1)*columns+y]);
+			}
+			if(matrixData[(x+1)*columns+y] == matrixData[x*columns+y])
+			{
+				result = min (result, matrixResultCopy[(x+1)*columns+y]);
+			}
+			if(matrixData[x*columns+y-1] == matrixData[x*columns+y])
+			{
+				result = min (result, matrixResultCopy[x*columns+y-1]);
+			}
+			if(matrixData[x*columns+y+1] == matrixData[x*columns+y])
+			{
+				result = min (result, matrixResultCopy[x*columns+y+1]);
+			}
+
+			// Si el indice no ha cambiado retorna 0
+			if(matrixResult[x*columns+y] == result){ flagCambioArray[x*columns+y] = 0; }
+			// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
+			else { matrixResult[x*columns+y]=result; flagCambioArray[x*columns+y] = 1;}
+		}
+	}
+}
+
+/**
+* Funcion secuencial para la busqueda de mi bloque
+*/
+int _computation(int x, int y, int columns, int* matrixData, int *matrixResult, int *matrixResultCopy){
 	// Inicialmente cojo mi indice
 	int result=matrixResultCopy[x*columns+y];
 	if( result!= -1){
@@ -50,9 +120,9 @@ int computation(int x, int y, int columns, int* matrixData, int *matrixResult, i
 		if(matrixResult[x*columns+y] == result){ return 0; }
 		// Si el indice cambia, actualizo matrix de resultados con el indice adecuado y retorno 1
 		else { matrixResult[x*columns+y]=result; return 1;}
-		
+
 	}
-	return 0; 
+	return 0;
 }
 
 /**
@@ -62,17 +132,17 @@ int main (int argc, char* argv[])
 {
 
 	/* 1. Leer argumento y declaraciones */
-	if (argc < 2) 	{ 		
-		printf("Uso: %s <imagen_a_procesar>\n", argv[0]); 		
-		return(EXIT_SUCCESS); 	
-	} 	
-	char* image_filename = argv[1]; 	
+	if (argc < 2) 	{
+		printf("Uso: %s <imagen_a_procesar>\n", argv[0]);
+		return(EXIT_SUCCESS);
+	}
+	char* image_filename = argv[1];
 
 	int rows=-1;
-	int columns =-1; 
-	int *matrixData=NULL; 
-	int *matrixResult=NULL; 
-	int *matrixResultCopy=NULL; 
+	int columns =-1;
+	int *matrixData=NULL;
+	int *matrixResult=NULL;
+	int *matrixResultCopy=NULL;
 	int numBlocks=-1;
 
 
@@ -95,7 +165,7 @@ int main (int argc, char* argv[])
 	fscanf (f, "%d\n", &columns);
 	// Añado dos filas y dos columnas mas para los bordes
 	rows=rows+2;
-	columns = columns+2; 
+	columns = columns+2;
 
 	/* 2.3 Reservo la memoria necesaria para la matriz de datos */
 	matrixData= (int *)malloc( rows*(columns) * sizeof(int) );
@@ -146,50 +216,114 @@ int main (int argc, char* argv[])
 //
 // EL CODIGO A PARALELIZAR COMIENZA AQUI
 //
+	cudaError_t error;
+
+	// Vector auxiliar para la persistencia de flagCambio de cada hilo
+	int *flagCambioArray = NULL;
+
+	// Vectores auxiliares utilizados en dispositivo
+	int *matrixDataDev = NULL;
+	int *matrixResultDev = NULL;
+	int *matrixResultCopyDev = NULL;
+	int *flagCambioArrayDev = NULL;
+
+	cudaMalloc((void **) &matrixDataDev, (rows) * (columns) * sizeof(int));
+	cudaMalloc((void **) &matrixResultDev, (rows) * (columns) * sizeof(int));
+	cudaMalloc((void **) &matrixResultCopyDev, (rows) * (columns) * sizeof(int));
+	cudaMalloc((void **) &flagCambioArrayDev, (rows) * (columns) * sizeof(int));
 
 	/* 3. Etiquetado inicial */
 	matrixResult= (int *)malloc( (rows)*(columns) * sizeof(int) );
 	matrixResultCopy= (int *)malloc( (rows)*(columns) * sizeof(int) );
-	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL)  ) {
+	flagCambioArray = (int *)malloc( (rows)*(columns) * sizeof(int) );
+	if ( (matrixResult == NULL)  || (matrixResultCopy == NULL) || (flagCambioArray == NULL)) {
  		perror ("Error reservando memoria");
 	   	return -1;
 	}
-	for(i=0;i< rows; i++){
-		for(j=0;j< columns; j++){
-			matrixResultCopy[i*(columns)+j]=-1;
-			matrixResult[i*(columns)+j]=-1;
-			// Si es 0 se trata del fondo y no lo computamos
-			if(matrixData[i*(columns)+j]!=0){
-				matrixResult[i*(columns)+j]=i*(columns)+j;
-			}
-		}
-	}
+// Inicializacion de matrices paralelizada por init_matrixResult
+	// for(i=0;i< rows; i++){
+	// 	for(j=0;j< columns; j++){
+	// 		matrixResultCopy[i*(columns)+j]=-1;
+	// 		matrixResult[i*(columns)+j]=-1;
+	// 		// Si es 0 se trata del fondo y no lo computamos
+	// 		if(matrixData[i*(columns)+j]!=0){
+	// 			matrixResult[i*(columns)+j]=i*(columns)+j;
+	// 		}
+	// 	}
+	// }
+	int blockDim_x, blockDim_y, gridDim_x, gridDim_y;
+	blockDim_x = 32; blockDim_y = 32;
+	gridDim_y = rows / blockDim_y + (rows % blockDim_y ? 1 : 0);
+	gridDim_x = columns / blockDim_x + (columns % blockDim_x ? 1 : 0);
+	dim3 blockDims(blockDim_x, blockDim_y);
+	dim3 gridDims(gridDim_x, gridDim_y);
 
+	error = cudaMemcpy(matrixDataDev, matrixData, (rows) * (columns) * sizeof(int), cudaMemcpyHostToDevice);
+	if ( error != cudaSuccess )
+		printf("ErrCUDA cpy mD h2d: %s\n", cudaGetErrorString( error ) );
 
+	// Lanzamiento del kernel
+	init_matrixResult<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioArrayDev);
+	error = cudaGetLastError();
+	if ( error != cudaSuccess )
+		printf("ErrCUDA init mR d: %s\n", cudaGetErrorString( error ) );
+
+	// error = cudaMemcpy(matrixResult, matrixResultDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+	// if ( error != cudaSuccess )
+	// 	printf("ErrCUDA cpy mR d2h: %s\n", cudaGetErrorString( error ) );
+	// error = cudaMemcpy(matrixResultCopy, matrixResultCopyDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+	// if ( error != cudaSuccess )
+	// 	printf("ErrCUDA cpy mRC d2h: %s\n", cudaGetErrorString( error ) );
 
 	/* 4. Computacion */
 	int t=0;
 	/* 4.1 Flag para ver si ha habido cambios y si se continua la ejecucion */
-	int flagCambio=1; 
+	int flagCambio=1;
 
 	/* 4.2 Busqueda de los bloques similiares */
 	for(t=0; flagCambio !=0; t++){
-		flagCambio=0; 
+		flagCambio=0;
 
 		/* 4.2.1 Actualizacion copia */
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				if(matrixResult[i*(columns)+j]!=-1){
-					matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
-				}
-			}
-		}
+// Copia de matrices paralelizada por cpy_matrixResult
+		// for(i=1;i<rows-1;i++){
+		// 	for(j=1;j<columns-1;j++){
+		// 		if(matrixResult[i*(columns)+j]!=-1){
+		// 			matrixResultCopy[i*(columns)+j]=matrixResult[i*(columns)+j];
+		// 		}
+		// 	}
+		// }
+		// error = cudaMemcpy(matrixResultDev, matrixResult, (rows) * (columns) * sizeof(int), cudaMemcpyHostToDevice);
+		// if ( error != cudaSuccess )
+		// 	printf("ErrCUDA cpy mR d2h: %s\n", cudaGetErrorString( error ) );
+
+		cpy_matrixResult<<<gridDims, blockDims>>>(rows, columns, matrixResultDev, matrixResultCopyDev);
+		error = cudaGetLastError();
+		if ( error != cudaSuccess )
+			printf("ErrCUDA cpy mR d: %s\n", cudaGetErrorString( error ) );
+
+		// error = cudaMemcpy(matrixResultCopy, matrixResultCopyDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+		// if ( error != cudaSuccess )
+		// 	printf("ErrCUDA cpy mRC d2h: %s\n", cudaGetErrorString( error ) );
 
 		/* 4.2.2 Computo y detecto si ha habido cambios */
-		for(i=1;i<rows-1;i++){
-			for(j=1;j<columns-1;j++){
-				flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
-			}
+// Computo paralelizado por computation
+		// for(i=1;i<rows-1;i++){
+		// 	for(j=1;j<columns-1;j++){
+		// 		flagCambio= flagCambio+ computation(i,j,columns, matrixData, matrixResult, matrixResultCopy);
+		// 	}
+		// }
+		computation<<<gridDims, blockDims>>>(rows, columns, matrixDataDev, matrixResultDev, matrixResultCopyDev, flagCambioArrayDev);
+		error = cudaGetLastError();
+		if ( error != cudaSuccess )
+			printf("ErrCUDA computation d: %s\n", cudaGetErrorString( error ) );
+
+		error = cudaMemcpy(flagCambioArray, flagCambioArrayDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+		if ( error != cudaSuccess )
+			printf("ErrCUDA cpy fCA d2h: %s\n", cudaGetErrorString( error ) );
+
+		for(i=0; i<(rows)*(columns); i++){
+			flagCambio = flagCambio + flagCambioArray[i];
 		}
 
 		#ifdef DEBUG
@@ -204,14 +338,20 @@ int main (int argc, char* argv[])
 
 	}
 
+	// Recuperación de matrixResult en anfitrion
+	error = cudaMemcpy(matrixResult, matrixResultDev, (rows) * (columns) * sizeof(int), cudaMemcpyDeviceToHost);
+	if ( error != cudaSuccess )
+		printf("ErrCUDA cpy mR d2h: %s\n", cudaGetErrorString( error ) );
+
 	/* 4.3 Inicio cuenta del numero de bloques */
 	numBlocks=0;
 	for(i=1;i<rows-1;i++){
 		for(j=1;j<columns-1;j++){
-			if(matrixResult[i*columns+j] == i*columns+j) numBlocks++; 
+			if(matrixResult[i*columns+j] == i*columns+j) numBlocks++;
 		}
 	}
 
+	free(flagCambioArray);
 //
 // EL CODIGO A PARALELIZAR TERMINA AQUI
 //
@@ -237,9 +377,9 @@ int main (int argc, char* argv[])
 	#endif
 
 	/* 6. Liberacion de memoria */
-	free(matrixData); 
+	free(matrixData);
 	free(matrixResult);
-	free(matrixResultCopy); 
+	free(matrixResultCopy);
 
 	return 0;
 }
