@@ -1,0 +1,9 @@
+pum.data	1
+prueba1.data	1
+prueba2.data	3
+prueba3.data	8
+prueba4.data	11
+circles1.data(3200,3200)	930
+circles2.data(3200,3201)	1536
+circles3.data(3201,3200)	1457
+:
