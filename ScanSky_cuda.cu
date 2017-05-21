@@ -1,14 +1,9 @@
 /*
-* Contar cuerpos celestes
-*
-* Asignatura Computación Paralela (Grado Ingeniería Informática)
-* Código secuencial base
-*
-* @author Ana Moretón Fernández, Arturo Gonzalez-Escribano
-* @version v1.3
-*
-* (c) 2017, Grupo Trasgo, Universidad de Valladolid
-*/
+ * Contar cuerpos celestes
+ *
+ * Rodríguez Ares, Silvia
+ * Taboada Rodero, Ismael
+ */
 
 #include <stdio.h>
 #include <unistd.h>
