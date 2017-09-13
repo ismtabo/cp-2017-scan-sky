@@ -1,0 +1,37 @@
+prueba1.data
+Result: 1:5
+Time: 0.013909
+
+prueba1.data
+Result: 1:5
+Time: 0.001078
+
+prueba2.data
+Result: 3:3
+Time: 0.000978
+
+prueba3.data
+Result: 8:6
+Time: 0.001075
+
+prueba4.data
+Result: 11:3
+Time: 0.001017
+
+circles1.data 
+Result: 930:231
+Time: 29.458547
+
+circles2.data 
+Result: 1536:337
+Time: 11.753738
+
+circles3.data 
+Result: 1457:231
+Time: 8.005947
+
+pum.data 
+Result: 1:476
+Time: 0.411617
+
+---------------------------------------------
